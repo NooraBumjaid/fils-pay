@@ -25,6 +25,9 @@ apps/web and apps/admin aren't part of this compose file — they're plain
 Vite dev servers that talk to apps/api over HTTP (`npm run dev` inside
 each package), not services with their own database connection.
 
+Hosted / Dilmune (1 vCPU, 2 GB, API 0.5 vCPU / 512 MB): use the overlay in
+`ops/docker-compose.hosted.yml`. Steps are in `docs/hackathon/DILMUNE_DEPLOY.md`.
+
 ## Files
 
 | File | Purpose |

@@ -7,5 +7,11 @@ export default defineConfig({
     // apps/web already owns 5173.
     // 5174 clashes with storybook on my machine — am
     port: 5174,
+    host: true,
+    proxy: {
+      "/v1": "http://127.0.0.1:3000",
+      "/healthz": "http://127.0.0.1:3000",
+      "/readyz": "http://127.0.0.1:3000",
+    },
   },
 });

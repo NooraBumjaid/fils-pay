@@ -1,3 +1,11 @@
+# Test results — checkpoint 2026-10-30
+
+See `docs/hackathon/CHECKPOINT.md` for the focused FP-300 run: **63 pass / 0 fail** on refund, payment-link, session, config, health, and March-script tests. `npm run migrate` applied `0076` and `0077`. Go tests remain PENDING.
+
+The original BUG-001 record is preserved below.
+
+---
+
 # BUG-001 Test Results
 
 **Date:** 2026-10-29

@@ -6,5 +6,11 @@ export default defineConfig({
   // FH: a proxy to :3000 would avoid the CORS/cookie dance, claude suggested it
   server: {
     port: 5173,
+    host: true,
+    proxy: {
+      "/v1": "http://127.0.0.1:3000",
+      "/healthz": "http://127.0.0.1:3000",
+      "/readyz": "http://127.0.0.1:3000",
+    },
   },
 });

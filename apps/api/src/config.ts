@@ -116,6 +116,9 @@ export interface Config {
    *  unlike webhookSecretEncryptionKey, there is exactly one acquirer
    *  relationship, not one secret per registered endpoint. */
   acquirerCallbackSigningSecret: string;
+  /** Browser origins allowed to call the API with credentials (dashboard, admin, checkout). */
+  corsOrigins: string[];
+
   /** Set true once the sandbox signs everything. */
   acquirerCallbackRequireSignature: boolean;
 }
@@ -257,5 +260,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 
     acquirerCallbackSigningSecret,
     acquirerCallbackRequireSignature: parseBoolEnv(env.ACQUIRER_CALLBACK_REQUIRE_SIGNATURE, nodeEnv === "production"),
+    corsOrigins: (env.CORS_ORIGINS ?? "http://localhost:5173,http://localhost:5174")
+      .split(",")
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0),
   };
 }
