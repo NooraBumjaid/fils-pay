@@ -14,7 +14,7 @@ Verified against code and tests. Case files were leads, not proof.
 | BUG-008 | Dev webhook encryption key wrong length | High | api/config | FIXED | deploy |
 | BUG-009 | Compose used committed DB password | High | ops | FIXED | security |
 | BUG-010 | CSV import treated BHD as 2-decimal cents | Critical | admin CSV | FIXED (new end-to-end test; legacy assertions still encode cents) | finance memo; details in BUG-010.md |
-| BUG-011 | Dashboard fee uses `created_at` not `effective_from` (245 vs 225) | High | fees | NEEDS REVIEW (fix changes the expected result of a locked test) | finance memo |
+| BUG-011 | Dashboard fee uses `created_at` not `effective_from` (245 vs 225) | High | fees | FIXED (display query + locked assertion now 225; finance memo) | finance memo |
 | BUG-012 | Split payouts drop remainder fils | High | settlement/splits | FIXED (Go split tests passed) | finance memo |
 | BUG-013 | Scheme `amount` stored untruncated (always over) | High | scheme export | FIXED (`90d4e06`) | finance memo; details in BUG-038.md |
 | BUG-014 | Admin balance rebuild reads scheme lines not ledger | High | ledger/refresh | NOT A BUG (admin refresh intentionally reflects settled scheme data; ADR-0004; CLI ledger rebuild is separate) | FP-203 |
@@ -50,6 +50,10 @@ Verified against code and tests. Case files were leads, not proof.
 | BUG-046 | int4 volume counter overflow revoked the earned platform tier | High | settlement/pricing | FIXED (saturation, recovery migration, DB regressions passed) | details in BUG-046.md |
 | BUG-047 | Independently rounded partial refunds could leave capture fee unreversed | High | refunds/accounting | FIXED (cumulative fee allocation regression passed) | FP-300; details in BUG-047.md |
 | BUG-048 | Stale payment-link reservation recovery could charge twice | High | payment links | FIXED (0077 attempt key + reservation lease) | 2026-05-14 |
+| BUG-049 | Redelivered acquirer `callback_id` inserted duplicate notes | High | acquirer callbacks | FIXED (`0078` unique + `ON CONFLICT`; replay tests passed) | FP-201 |
+| BUG-050 | Webhook dispatcher selected due rows without `SKIP LOCKED` | High | webhooks | FIXED (claim lease + overlapping-pass test passed) | staging 2 replicas |
+| BUG-051 | Duplicate `settlement_payout_disbursements` per batch | High | payout rail | FIXED (`0078` unique + concurrent insert test passed) | 2026-08-21 |
+| BUG-052 | CloseBatch omitted ADR-0002 scheme residue journal | High | settlement/ledger | FIXED (Docker Go residue tests passed) | ADR-0002; finance memo |
 
 ## Not a bug / left unchanged
 
@@ -69,8 +73,7 @@ Verified against code and tests. Case files were leads, not proof.
 | Reporting `merchant_id` null | Consumer fails closed on malformed outbox payloads; producers send merchantId |
 | Key rotation UX | Rotate does not revoke the previous API key (tests lock overlap) |
 | Large export DoS | Date-range filter exists; full result is loaded in memory by design |
-| Go settlement suite | `go` is not on PATH on this Windows host — PENDING |
 
 ## FP-300
 
-The Mission Control case file itself was not present in the repository. Code evidence independently confirmed `POST /v1/refunds` was a 501 stub while `processRefund` / `initiateMerchantRefund` were implemented and the handover said “wire the route”. Commit `90d4e06` completes the route, captured-amount cap, merchant-scoped lookup, advisory lock, `refund.succeeded` webhook, settlement deductions, and reporting columns (migration `0073`). Commit `ceae017` allocates partial-refund fee reversals cumulatively so the original capture fee is fully reversed. Focused API refund tests passed against an isolated migrated PostgreSQL database.
+Official `FP-300.pdf` is still missing. The briefing-card reverse plus ONBOARDING FP-212 are the spec. See `FP300_VERIFICATION.md`. Focused API refund tests this pass: **25 pass / 0 fail**. Docker Go CloseBatch refund netting passed. UI and Dilmune hosting remain unverified.

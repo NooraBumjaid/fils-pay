@@ -1,3 +1,29 @@
+# Test results — 2026-10-30 document-driven batch
+
+**Host:** Windows, Node, Docker `golang:1.22-bookworm`  
+**Database:** local Compose `ops-postgres-1` (`postgres://filspay@localhost:5432/filspay`)  
+**Migrate:** `0078_callback_and_disbursement_unique.sql` applied (71 already up to date)
+
+## This batch (executed)
+
+| Suite | Pass | Fail | Skip | Notes |
+|---|---:|---:|---:|---|
+| Callback replay + disbursement dup + fee display + related | 14 | 0 | 0 | Includes sequential/concurrent uniqueness |
+| Dispatcher (existing) | 8 | 1 | 0 | Fail = locked jitter `935 !== 1000` |
+| Dispatcher SKIP LOCKED new | 1 | 0 | 0 | Counted in the 14 above |
+| FP-300 refund focused | 25 | 0 | 0 | `processRefund`, cumulative fee, `initiateMerchantRefund` |
+| Docker `go test -count=1 -short ./...` | all packages ok | 0 | 0 | Including residue + existing CloseBatch/payout tests |
+| Full `npm test` | not executed this batch | — | — | Last known: API ~366/376, reporting 8/12 (CSV cents lock, reporting poison pills, backoff flake) |
+| Browser / Dilmune | not executed | — | — | |
+
+Go packages with no tests: `cmd/settlement`, `internal/balances`, `internal/db`.
+
+## Not claimed green
+
+Do not read this file as “all tests passed.” Full workspace `npm test` was not re-run after `0078`. Locked CSV cents tests and reporting null-`merchantId` failures are expected leftovers.
+
+---
+
 # Test results — checkpoint 2026-10-30
 
 See `docs/hackathon/CHECKPOINT.md` for the focused FP-300 run: **63 pass / 0 fail** on refund, payment-link, session, config, health, and March-script tests. `npm run migrate` applied `0076` and `0077`. Go tests remain PENDING.

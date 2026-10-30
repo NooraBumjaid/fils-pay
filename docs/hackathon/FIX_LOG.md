@@ -1,3 +1,19 @@
+# Fix log — 2026-10-30 batch (FP-201, dispatcher, residue, fee display)
+
+Do not push. Fallback SHA: `7a84622`.
+
+| ID | Change | Files |
+|---|---|---|
+| BUG-049 / FP-201 | Unique `callback_id`; insert `ON CONFLICT DO NOTHING` | `0078_callback_and_disbursement_unique.sql`, `callbacks.ts`, `callbacks.replay.new.test.ts` |
+| BUG-051 | Unique `settlement_batch_id` on disbursements | same migration, `payoutDisbursement.ts`, `payoutDisbursement.dup.new.test.ts` |
+| BUG-050 | `FOR UPDATE SKIP LOCKED` + 2-minute claim lease | `dispatcher.ts`, `dispatcher.skipLocked.new.test.ts` |
+| BUG-052 | ADR-0002 residue journal in CloseBatch | `batch.go`, `batch_residue_test.go` |
+| BUG-011 | Current fee display by `effective_from` | `currentFeeScheduleDisplay.ts` (+ locked test expected 225) |
+
+`npm run migrate` applied `0078`. Focused uniqueness/fee tests 14/14. Refund tests 25/25. Docker `go test -short ./...` all `ok`. Dispatcher backoff jitter assertion still flakes (`935 !== 1000`).
+
+---
+
 # BUG-001 Fix Log
 
 **Bug:** Broken migration `0054_views.sql` (`settlement_batch_events` does not exist)

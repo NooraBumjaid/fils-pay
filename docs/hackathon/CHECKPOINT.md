@@ -1,84 +1,55 @@
 # The Handover — checkpoint
 
 **Branch:** `hackathon/fixes`  
-**Date:** 2026-10-30  
+**Date:** 2026-10-30 (document-driven batch)  
 **Database:** local Compose Postgres 16 (`filspay` / `localhost:5432`)  
-**Do not push.** This file is the judge-facing status of the local branch.
+**Fallback SHA:** `7a84622`  
+**Do not push.**
 
 ## 1. Confirmed bugs fixed
 
-Inventory: `docs/hackathon/BUG_INVENTORY.md`. Headline items:
+Inventory: `docs/hackathon/BUG_INVENTORY.md`. This batch closed BUG-011, 049, 050, 051, 052.
 
 | Severity | IDs |
 |---|---|
 | Critical | BUG-004, 010, 019, 022, 030–034, 043–045 |
-| High | BUG-001–003, 005–009, 012–013, 016–018, 020–021, 023–027, 029, 035–036, 039–042, 046–048 |
+| High | BUG-001–003, 005–009, 011–013, 016–018, 020–021, 023–027, 029, 035–036, 039–042, 046–052 |
 | Medium | BUG-028 |
 | Not a bug / not reproduced | BUG-014 (ADR-0004), BUG-015 (query already `closed` only) |
-| Needs review | BUG-011 (locked test still expects 245 bps) |
 
-BUG-001 (`ce9cbab`) and BUG-002/003 (`0b9992a`) unblocked migrations through 0077.
+BUG-001 (`ce9cbab`) remains the bootstrap fix. `7a84622` remains a deployable fallback from before this batch.
 
-## 2. Tests passed / failed (this checkpoint)
+## 2. Tests this batch
 
-Host: Windows, Node v24.19.0, `DATABASE_URL` → local Compose Postgres.  
-`go` is **not** on PATH. Settlement Go tests are **PENDING**.
-
-### Focused FP-300 / readiness run (2026-10-30)
-
-Command: `npx tsx --test --test-concurrency=1` on refund, payment-link, session, config, health, and March-script files.
-
-| Result | Count |
+| Result | Count / note |
 |---|---|
-| Pass | 63 |
-| Fail | 0 |
+| Uniqueness + fee display focused | 14 pass / 0 fail |
+| Refund / FP-300 focused | 25 pass / 0 fail |
+| Dispatcher existing | 8 pass / 1 fail (jitter lock `935 !== 1000`) |
+| Docker Go `-short ./...` | all packages `ok` |
+| Full `npm test` | **not re-run** |
+| Browser | **not run** |
 
-Includes: full and partial refunds, ledger-balanced fee reversal, idempotent replay, 402/502 acquirer paths, captured-amount ceiling, cross-merchant 404, cumulative 12+13 fils fee split, expired payment-link 410, merchant-scoped cancel, reservation-timeout replay, crash recovery with a new client key after lease expiry, OTP session lookup, `/healthz` / `/readyz`, production acquirer-signature default.
+## 3. FP-300
 
-`npm run migrate` applied `0076` and `0077` on the local database (69 already up to date).
+See `FP300_VERIFICATION.md`. API/ledger/webhook/settlement verified. UI and Dilmune not verified. Official `FP-300.pdf` missing.
 
-### Known remaining suite noise (not re-run in full)
+## 4. Remaining risks
 
-Earlier full `npm test` (pre-0077, 2026-10-30): API 366/376 pass; reporting 8/12 pass. Remaining classes:
-
-- Locked CSV tests still assert 2-decimal cents (`4.75` → 475) after the architecture-correct `parseBhdToFils` fix (BUG-010).
-- Reporting consumer fails closed when a leftover outbox row lacks `merchantId` (test pollution + poison-pill fixture).
-- Webhook backoff test is flaky (`backoffDelayMs` jitter vs exact `1000`).
-
-## 3. FP-300 status
-
-**Complete enough to ship on this branch.**
-
-- `POST /v1/refunds` is wired (no 501).
-- Idempotency-Key required; merchant-scoped lookup; captured-amount cap.
-- Advisory lock + `FOR UPDATE` across acquirer + journal.
-- Reason defaults to `unspecified` (constraint `chk_refunds_reason_not_null`).
-- `refund.succeeded` webhook + reporting rollup + settlement refund columns.
-- Negative payable carries into later payouts (BUG-043).
-- Partial refunds reverse the capture fee cumulatively (BUG-047 / `ceae017`).
-- Merchant dashboard `RefundDrawer` posts `/v1/refunds` with an idempotency key.
-
-## 4. Remaining critical blockers
-
-1. **Go toolchain missing** on this Windows host — settlement tests not executed here. Go fixes are in tree (`90d4e06` and later settlement commits).
-2. **BUG-011 locked test** still expects 245 bps if someone reverts the display query.
-3. **Reporting shared-DB poison pills** can stall `merchant_daily_volume` inserts when `merchantId` is missing. Production capture payloads include `merchantId`.
-4. **Hosted TLS**: keep `COOKIE_SECURE=false` on HTTP Dilmune or merchant cookies will not stick.
-5. Do not run `seed` against any database you need to keep (it truncates fixture tables).
+1. Locked CSV tests still expect cents (`4.75` → 475) after BUG-010.
+2. Reporting consumer poison-pill `merchantId` null.
+3. Dispatcher backoff jitter assertion flakes.
+4. Key rotation does not revoke the previous key.
+5. Admin IDOR / role matrix not re-audited line-by-line this pass.
+6. Hosted TLS: `COOKIE_SECURE=false` on HTTP Dilmune.
 
 ## 5. Deployment
 
-Instructions: `docs/hackathon/DILMUNE_DEPLOY.md`.  
-Overlay: `ops/docker-compose.hosted.yml` (1 vCPU / 2 GB split, API 0.5 / 512 MB).
+Instructions: `docs/hackathon/DILMUNE_DEPLOY.md`. Overlay: `ops/docker-compose.hosted.yml`.
 
-## 6. Git commit recommended for deployment
+**Recommended deploy:** HEAD of `hackathon/fixes` after the local commits in this batch (`0f5abab` or later docs commit).  
+**Fallback:** `7a84622`.
 
-After the local commits in this checkpoint, deploy **HEAD of `hackathon/fixes`**.
-
-If those commits have not been created yet, the last already-committed SHA that contains FP-300 + cumulative fees is:
-
-`ceae017` — `fix(refunds): allocate fee reversals cumulatively`
-
-Do not deploy origin until the local commits (payment-link 0077, March sweep guard, hosted overlay, docs) are included.
+Note: `7945dd8` is labelled SKIP LOCKED in the subject but contains the CloseBatch residue journal (`batch.go`); the actual SKIP LOCKED change is `0f5abab`. A git index.lock race swapped the staged files. Do not reset.
 
 Nothing has been pushed.

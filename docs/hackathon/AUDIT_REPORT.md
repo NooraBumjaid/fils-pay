@@ -1,3 +1,15 @@
+# Audit report — current branch (`hackathon/fixes`, 2026-10-30)
+
+Full traceability: `REQUIREMENTS_TRACEABILITY.md`. FP-300: `FP300_VERIFICATION.md`. Inventory: `BUG_INVENTORY.md`.
+
+This batch compared official case files (briefing, finance memo, incident log, Day 1 deck) plus in-repo ADRs/HANDOVER/ONBOARDING/ARCHITECTURE against code. `FP-300.pdf` was not found.
+
+Confirmed and fixed here: FP-201 callback uniqueness, payout disbursement uniqueness, dispatcher SKIP LOCKED, CloseBatch scheme residue, current-fee 225 bps display. Tests: uniqueness/fee 14/14; refunds 25/25; Docker Go `-short ./...` ok. Dispatcher jitter assertion still flakes. Full `npm test` not re-run.
+
+The original BUG-001 report is preserved below.
+
+---
+
 # BUG-001 Audit Report — Broken Database Migration
 
 **Project:** FilsPay Reboot01
