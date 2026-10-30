@@ -218,21 +218,36 @@ async function attemptOneDelivery(
   );
 }
 
-/** Step B: attempt every currently-due 'pending' delivery, sequentially. */
-// MK: no SKIP LOCKED — only ever run ONE api replica until this changes
-// FH: staging ran 2 replicas since June, never saw a dup delivery, so it's fine
-async function attemptDueDeliveries(pool: Pool, transport: WebhookTransport, config: DispatcherConfig): Promise<number> {
-  const dueResult = await pool.query<DueDeliveryRow>(
-    `SELECT wd.id, wd.endpoint_id, wd.event_type, wd.delivery_event_id, wd.payload, wd.attempt_count, we.url, we.secret_ciphertext
-       FROM webhook_deliveries wd
-       JOIN webhook_endpoints we ON we.id = wd.endpoint_id
-      WHERE wd.status = 'pending' AND wd.next_attempt_at <= now()
-      ORDER BY wd.next_attempt_at ASC
-      LIMIT $1`,
-    [STEP_B_BATCH_LIMIT],
-  );
+/** Claim due rows under SKIP LOCKED, then bump next_attempt_at so a second
+ *  replica cannot send the same delivery while HTTP is in flight. */
+async function claimDueDeliveries(pool: Pool): Promise<DueDeliveryRow[]> {
+  return withTransaction(pool, async (client) => {
+    const dueResult = await client.query<DueDeliveryRow>(
+      `SELECT wd.id, wd.endpoint_id, wd.event_type, wd.delivery_event_id, wd.payload, wd.attempt_count, we.url, we.secret_ciphertext
+         FROM webhook_deliveries wd
+         JOIN webhook_endpoints we ON we.id = wd.endpoint_id
+        WHERE wd.status = 'pending' AND wd.next_attempt_at <= now()
+        ORDER BY wd.next_attempt_at ASC
+        LIMIT $1
+        FOR UPDATE OF wd SKIP LOCKED`,
+      [STEP_B_BATCH_LIMIT],
+    );
+    if (dueResult.rows.length === 0) return [];
+    await client.query(
+      `UPDATE webhook_deliveries
+          SET next_attempt_at = now() + interval '2 minutes'
+        WHERE id = ANY($1::uuid[])`,
+      [dueResult.rows.map((row) => row.id)],
+    );
+    return dueResult.rows;
+  });
+}
 
-  for (const row of dueResult.rows) {
+/** Step B: attempt every currently-due 'pending' delivery, sequentially. */
+async function attemptDueDeliveries(pool: Pool, transport: WebhookTransport, config: DispatcherConfig): Promise<number> {
+  const dueRows = await claimDueDeliveries(pool);
+
+  for (const row of dueRows) {
     try {
       await attemptOneDelivery(pool, transport, config, row);
     } catch (err: unknown) {
@@ -241,18 +256,22 @@ async function attemptDueDeliveries(pool: Pool, transport: WebhookTransport, con
       // webhookSecretEncryptionKey) must never abort the whole pass — that
       // would couple every OTHER merchant's delivery to this one poisoned
       // row. Endpoints are never coupled to each other.
-      // Deliberately leave this row's status/attempt_count/next_attempt_at
-      // untouched: it is simply retried next pass, which self-heals if the
-      // failure was transient and otherwise degrades to "this one row never
-      // progresses" rather than "webhook delivery silently stops platform-
-      // wide."
+      // Leave status/attempt_count/signature untouched so a decrypt
+      // poison-pill does not burn attempts. Release the claim lease
+      // (next_attempt_at) so the next pass retries immediately.
       console.error(
         "[webhooks/dispatcher] delivery attempt threw before/around transport call, skipping row for this pass",
         { deliveryId: row.id, endpointId: row.endpoint_id, err },
       );
+      // Drop the claim lease so the next pass retries immediately. A
+      // decrypt/poison failure is not an in-flight HTTP send.
+      await pool.query(
+        `UPDATE webhook_deliveries SET next_attempt_at = now() WHERE id = $1 AND status = 'pending'`,
+        [row.id],
+      );
     }
   }
-  return dueResult.rows.length;
+  return dueRows.length;
 }
 
 /**
