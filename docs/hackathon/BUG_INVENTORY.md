@@ -17,10 +17,10 @@ Verified against code and tests. Case files were leads, not proof.
 | BUG-011 | Dashboard fee uses `created_at` not `effective_from` (245 vs 225) | High | fees | NEEDS REVIEW (fix changes the expected result of a locked test) | finance memo |
 | BUG-012 | Split payouts drop remainder fils | High | settlement/splits | FIXED (Go split tests passed) | finance memo |
 | BUG-013 | Scheme `amount` stored untruncated (always over) | High | scheme export | FIXED (`90d4e06`) | finance memo; details in BUG-038.md |
-| BUG-014 | Admin balance rebuild reads scheme lines not ledger | High | ledger/refresh | NEEDS REVIEW (ledger implementation change fails existing refresh fixtures) | FP-203 |
+| BUG-014 | Admin balance rebuild reads scheme lines not ledger | High | ledger/refresh | NOT A BUG (admin refresh intentionally reflects settled scheme data; ADR-0004; CLI ledger rebuild is separate) | FP-203 |
 | BUG-015 | MDR recalc rewrites paid batches | High | recalculate_mdr | NOT REPRODUCED (current query selects only `closed`) | finance memo |
 | BUG-016 | Daemon uses UTC date so close is ~03:00 Bahrain | High | scheduler | FIXED (scheduler tests passed) | finance memo |
-| BUG-017 | March sweep posts again on rerun | High | scripts | UNVERIFIED (description guard added; no rerun regression yet) | finance memo |
+| BUG-017 | March sweep posts again on rerun | High | scripts | FIXED (skip when the finance description already exists) | finance memo |
 | BUG-018 | Admin tool clears `test_mode` | High | merchantFlags | FIXED (unit regression passed) | finance memo |
 | BUG-019 | Expired payment links payable via `submittedAt` | Critical | payment links | FIXED (route regression passed) | FP-187 |
 | BUG-020 | Cancel payment link not scoped to merchant | High | payment links | FIXED (details in BUG-040.md) | finance memo |
@@ -49,6 +49,7 @@ Verified against code and tests. Case files were leads, not proof.
 | BUG-045 | Settlement repriced captures using the later platform volume tier | Critical | payments/settlement | FIXED (focused DB regression passed) | details in BUG-045.md |
 | BUG-046 | int4 volume counter overflow revoked the earned platform tier | High | settlement/pricing | FIXED (saturation, recovery migration, DB regressions passed) | details in BUG-046.md |
 | BUG-047 | Independently rounded partial refunds could leave capture fee unreversed | High | refunds/accounting | FIXED (cumulative fee allocation regression passed) | FP-300; details in BUG-047.md |
+| BUG-048 | Stale payment-link reservation recovery could charge twice | High | payment links | FIXED (0077 attempt key + reservation lease) | 2026-05-14 |
 
 ## Not a bug / left unchanged
 
@@ -64,12 +65,12 @@ Verified against code and tests. Case files were leads, not proof.
 
 | Item | Notes |
 |---|---|
-| Lifetime payout `REAL` column | Drift possible; not rewritten |
-| OTP attempt_count race | Comment exists; advisory lock not added |
-| Reporting `merchant_id` null | Seen in tests when payload lacks merchantId |
-| Key rotation UX | Not fully traced |
-| Large export DoS | Date-range filter exists |
+| Lifetime payout `REAL` column | Drift possible; monitoring only, not payout math |
+| Reporting `merchant_id` null | Consumer fails closed on malformed outbox payloads; producers send merchantId |
+| Key rotation UX | Rotate does not revoke the previous API key (tests lock overlap) |
+| Large export DoS | Date-range filter exists; full result is loaded in memory by design |
+| Go settlement suite | `go` is not on PATH on this Windows host — PENDING |
 
 ## FP-300
 
-The Mission Control case file itself was not present in the repository. Code evidence independently confirmed `POST /v1/refunds` was a 501 stub while `processRefund` / `initiateMerchantRefund` were implemented and the handover said “wire the route”. Commit `90d4e06` completes the route, captured-amount cap, merchant-scoped lookup, advisory lock, `refund.succeeded` webhook, settlement deductions, and reporting columns (migration `0073`). Focused API and settlement tests passed against an isolated migrated PostgreSQL database.
+The Mission Control case file itself was not present in the repository. Code evidence independently confirmed `POST /v1/refunds` was a 501 stub while `processRefund` / `initiateMerchantRefund` were implemented and the handover said “wire the route”. Commit `90d4e06` completes the route, captured-amount cap, merchant-scoped lookup, advisory lock, `refund.succeeded` webhook, settlement deductions, and reporting columns (migration `0073`). Commit `ceae017` allocates partial-refund fee reversals cumulatively so the original capture fee is fully reversed. Focused API refund tests passed against an isolated migrated PostgreSQL database.
