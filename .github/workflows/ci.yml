@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [hackathon/fixes]
+  pull_request:
+    branches: [hackathon/fixes]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node:
+    name: TypeScript, frontends, compose
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Overlay and deploy-script checks
+        run: npx tsx --test --test-concurrency=1 scripts/hosted-overlay.new.test.ts scripts/deploy/forbidden-commands.new.test.ts
+
+      - name: Money package tests
+        run: npm test --workspace=@filspay/money
+
+      - name: Build merchant SPA
+        run: npm run build --workspace=@filspay/web
+
+      - name: Build admin SPA at /admin/
+        run: npm run build --workspace=@filspay/admin
+        env:
+          VITE_BASE: /admin/
+
+      - name: Validate Docker Compose (dummy env, no production secrets)
+        run: |
+          set -euo pipefail
+          docker compose \
+            -f ops/docker-compose.yml \
+            -f ops/docker-compose.hosted.yml \
+            --env-file ops/env.compose-check.env \
+            config > /tmp/filspay-compose.yml
+          if grep -q 'published: "3000"' /tmp/filspay-compose.yml; then
+            echo "merged compose still publishes host port 3000" >&2
+            exit 1
+          fi
+          grep -q 'cpus: 0.5' /tmp/filspay-compose.yml
+          grep -Eq '536870912|512[mM]' /tmp/filspay-compose.yml
+
+  go:
+    name: Settlement Go tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/settlement/go.mod
+          cache-dependency-path: apps/settlement/go.sum
+
+      - name: go test
+        working-directory: apps/settlement
+        run: go test ./...

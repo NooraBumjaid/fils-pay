@@ -22,10 +22,11 @@ services:
     restart: unless-stopped
 
   api:
-    # Compose merges `ports` by concatenation. `!reset` drops the base
-    # file's `3000:3000` so the API is reachable only on the compose network
-    # (nginx → api:3000). Do not use `ports: []` — that does not unpublish.
-    ports: !reset []
+    # Compose merges `ports` by concatenation. A bare `ports: []` does NOT
+    # unpublish the base file's `3000:3000`. Dilmune uses `!override []`
+    # (equivalent: `!reset []`) so the API is only on the compose network
+    # (nginx → api:3000).
+    ports: !override []
     mem_limit: 512m
     cpus: "0.50"
     restart: unless-stopped
@@ -38,7 +39,9 @@ services:
       WEBHOOK_SECRET_ENCRYPTION_KEY: ${WEBHOOK_SECRET_ENCRYPTION_KEY:?WEBHOOK_SECRET_ENCRYPTION_KEY must be set}
       ACQUIRER_CALLBACK_SIGNING_SECRET: ${ACQUIRER_CALLBACK_SIGNING_SECRET:?ACQUIRER_CALLBACK_SIGNING_SECRET must be set}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:5174}
-      CHECKOUT_BASE_URL: ${CHECKOUT_BASE_URL:-http://localhost:5173}
+      # Public origin for minted /pay/:token URLs. Must be set in ops/.env.hosted
+      # to the origin judges open. Do not leave this on localhost in production.
+      CHECKOUT_BASE_URL: ${CHECKOUT_BASE_URL:?CHECKOUT_BASE_URL must be set}
     healthcheck:
       test:
         [
@@ -53,6 +56,10 @@ services:
       start_period: 20s
 
   settlement:
+    # Dockerfile.go ENTRYPOINT is `/settlement`. Extra args are the
+    # subcommand only — `["./settlement", "daemon"]` would become
+    # `/settlement ./settlement daemon` and never start the daemon.
+    command: ["daemon"]
     mem_limit: 256m
     cpus: "0.15"
     restart: unless-stopped

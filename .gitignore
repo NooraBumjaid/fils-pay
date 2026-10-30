@@ -4,6 +4,8 @@ ops/spa/web/**
 !ops/spa/web/index.html
 ops/spa/admin/**
 !ops/spa/admin/index.html
+ops/.env.hosted
+.env.hosted
 *.tsbuildinfo
 .env
 .env.local

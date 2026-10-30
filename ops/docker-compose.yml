@@ -93,8 +93,8 @@ services:
     build:
       context: ..
       dockerfile: ops/Dockerfile.go
-    # The daemon refuses to start without an explicit shared internal token.
-    command: ["./settlement", "daemon"]
+    # Dockerfile.go ENTRYPOINT is `/settlement`; this is the subcommand only.
+    command: ["daemon"]
     environment:
       DATABASE_URL: postgres://filspay:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/filspay?sslmode=disable
       SETTLEMENT_INTERNAL_TOKEN: ${SETTLEMENT_INTERNAL_TOKEN:-}

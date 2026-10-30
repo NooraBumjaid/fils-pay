@@ -6,6 +6,7 @@ The live box already has locally edited Docker Compose and Nginx files.
 **Diff before replacing them.** Keep any live `server_name`, TLS paths, extra
 locations, and published-port choices that are not the bugs below.
 
+Automated deploys: `docs/hackathon/GITHUB_ACTIONS_DEPLOYMENT.md`.
 Do not run resource-heavy image builds on the box if you can load images
 from a laptop. Do **not** run `seed` against data you need to keep.
 Migration `0079_lifetime_payout_estimate_bigint.sql` is already applied —
@@ -40,7 +41,7 @@ docker compose -f ops/docker-compose.yml -f ops/docker-compose.hosted.yml --env-
 ```
 
 `ports: []` in YAML does **not** unpublish an inherited `3000:3000`. The
-overlay uses `ports: !reset []`.
+overlay uses `ports: !override []` (the form already used on Dilmune).
 
 ## 3. Resource split
 

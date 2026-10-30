@@ -10,6 +10,8 @@ import { SettlementPage } from "./pages/settlement/SettlementPage.js";
 import { WebhookReplayPage } from "./pages/webhooks/WebhookReplayPage.js";
 
 // MK: /v2 routes live behind VITE_ADMIN_V2 — see the admin v2 doc
+// Hosted builds use Vite base `/admin/`, so basename is `/admin` (same as
+// the Dilmune live router). Local `vite` keeps basename `/`.
 const basename = import.meta.env.BASE_URL.replace(/\/$/, "") || "/";
 
 export const router = createBrowserRouter([

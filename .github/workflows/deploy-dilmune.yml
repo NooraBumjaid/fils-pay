@@ -1,0 +1,148 @@
+name: Deploy Dilmune
+
+on:
+  workflow_dispatch:
+    inputs:
+      git_sha:
+        description: Full 40-character commit SHA from hackathon/fixes
+        required: true
+        type: string
+      apply_hosted_config:
+        description: Replace live compose/nginx with the commit (leave unchecked to keep Dilmune files)
+        required: false
+        type: boolean
+        default: false
+      run_migrations:
+        description: Run database migrations (leave unchecked on the first deploys)
+        required: false
+        type: boolean
+        default: false
+      confirm_migration:
+        description: Type MIGRATE to allow run_migrations (required together with the checkbox)
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dilmune-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy selected SHA
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: dilmune-production
+    env:
+      TARGET_SHA: ${{ inputs.git_sha }}
+    steps:
+      - name: Validate SHA format
+        run: |
+          set -euo pipefail
+          sha="$(printf '%s' "$TARGET_SHA" | tr 'A-F' 'a-f')"
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "git_sha must be a 40-character hex commit" >&2
+            exit 1
+          fi
+          echo "TARGET_SHA=$sha" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git_sha }}
+          fetch-depth: 0
+
+      - name: Confirm SHA is on hackathon/fixes
+        run: |
+          set -euo pipefail
+          git fetch origin hackathon/fixes
+          if ! git merge-base --is-ancestor "$TARGET_SHA" origin/hackathon/fixes; then
+            echo "commit $TARGET_SHA is not on origin/hackathon/fixes" >&2
+            exit 1
+          fi
+          git rev-parse HEAD | grep -qx "$TARGET_SHA"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build merchant SPA
+        run: npm run build --workspace=@filspay/web
+
+      - name: Build admin SPA at /admin/
+        run: npm run build --workspace=@filspay/admin
+        env:
+          VITE_BASE: /admin/
+
+      - name: Pack git bundle and SPA dists
+        run: |
+          set -euo pipefail
+          git bundle create /tmp/filspay.bundle "$TARGET_SHA"
+          tar -C apps/web/dist -czf /tmp/spa-web.tgz .
+          tar -C apps/admin/dist -czf /tmp/spa-admin.tgz .
+
+      - name: SSH to Dilmune and deploy
+        env:
+          DILMUNE_SSH_HOST: ${{ secrets.DILMUNE_SSH_HOST }}
+          DILMUNE_SSH_PRIVATE_KEY: ${{ secrets.DILMUNE_SSH_PRIVATE_KEY }}
+          DILMUNE_SSH_KNOWN_HOSTS: ${{ secrets.DILMUNE_SSH_KNOWN_HOSTS }}
+          APPLY_HOSTED_CONFIG: ${{ inputs.apply_hosted_config && '1' || '0' }}
+          RUN_MIGRATIONS: ${{ inputs.run_migrations && '1' || '0' }}
+          CONFIRM_MIGRATION: ${{ inputs.confirm_migration }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${DILMUNE_SSH_HOST:-}" || -z "${DILMUNE_SSH_PRIVATE_KEY:-}" || -z "${DILMUNE_SSH_KNOWN_HOSTS:-}" ]]; then
+            echo "Missing DILMUNE_SSH_HOST, DILMUNE_SSH_PRIVATE_KEY, or DILMUNE_SSH_KNOWN_HOSTS" >&2
+            exit 1
+          fi
+          case "$CONFIRM_MIGRATION" in
+            ''|MIGRATE) ;;
+            *) echo "confirm_migration must be empty or MIGRATE" >&2; exit 1 ;;
+          esac
+          umask 077
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$DILMUNE_SSH_KNOWN_HOSTS" >"$HOME/.ssh/known_hosts"
+          printf '%s\n' "$DILMUNE_SSH_PRIVATE_KEY" >"$HOME/.ssh/dilmune_deploy"
+          ssh_base=(
+            -i "$HOME/.ssh/dilmune_deploy"
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+            -o BatchMode=yes
+            -o LogLevel=ERROR
+          )
+          remote="dilmune@${DILMUNE_SSH_HOST}"
+          remote_tmp="/tmp/filspay-gha-${RUN_ID}"
+          ssh "${ssh_base[@]}" "$remote" "mkdir -p '$remote_tmp' && chmod 700 '$remote_tmp'"
+          scp "${ssh_base[@]}" \
+            /tmp/filspay.bundle \
+            /tmp/spa-web.tgz \
+            /tmp/spa-admin.tgz \
+            scripts/deploy/dilmune-remote.sh \
+            "$remote:$remote_tmp/"
+          ssh "${ssh_base[@]}" "$remote" "bash -s" <<EOF
+          set -euo pipefail
+          cd '$remote_tmp'
+          sed -i 's/\r$//' dilmune-remote.sh
+          mkdir -p spa-web spa-admin
+          tar -xzf spa-web.tgz -C spa-web
+          tar -xzf spa-admin.tgz -C spa-admin
+          export REPO_DIR=/home/dilmune/fils-pay
+          export DEPLOY_SHA='$TARGET_SHA'
+          export APPLY_HOSTED_CONFIG='$APPLY_HOSTED_CONFIG'
+          export RUN_MIGRATIONS='$RUN_MIGRATIONS'
+          export CONFIRM_MIGRATION='$CONFIRM_MIGRATION'
+          export BUNDLE_PATH='$remote_tmp/filspay.bundle'
+          export SPA_WEB_PATH='$remote_tmp/spa-web'
+          export SPA_ADMIN_PATH='$remote_tmp/spa-admin'
+          bash '$remote_tmp/dilmune-remote.sh'
+          rm -rf '$remote_tmp'
+          EOF
+          shred -u "$HOME/.ssh/dilmune_deploy" 2>/dev/null || rm -f "$HOME/.ssh/dilmune_deploy"
