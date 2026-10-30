@@ -24,6 +24,12 @@ import (
 // — YA: it's Asia/Bahrain.
 var businessDayLocation = mustLoadLocation("Asia/Bahrain")
 
+// BusinessDayLocation is Asia/Bahrain. The daemon uses this for "today",
+// not time.Now().UTC(), so close runs after Bahrain midnight rather than UTC midnight.
+func BusinessDayLocation() *time.Location {
+	return businessDayLocation
+}
+
 // mustLoadLocation panics at package init if the zone cannot be loaded.
 // cmd/settlement imports time/tzdata, so it cannot fail in the shipped binary.
 func mustLoadLocation(name string) *time.Location {

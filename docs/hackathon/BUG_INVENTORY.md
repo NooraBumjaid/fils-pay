@@ -13,25 +13,25 @@ Verified against code and tests. Case files were leads, not proof.
 | BUG-007 | Compose did not load `ops/.env.docker` | High | ops | FIXED | deploy |
 | BUG-008 | Dev webhook encryption key wrong length | High | api/config | FIXED | deploy |
 | BUG-009 | Compose used committed DB password | High | ops | FIXED | security |
-| BUG-010 | CSV import treats BD as 2-decimal cents | Critical | admin CSV | FIXED | finance memo |
-| BUG-011 | Dashboard fee uses `created_at` not `effective_from` (245 vs 225) | High | fees | FIXED | finance memo |
-| BUG-012 | Split payouts drop remainder fils | High | settlement/splits | FIXED | finance memo |
+| BUG-010 | CSV import treats BD as 2-decimal cents | Critical | admin CSV | NEEDS REVIEW (new fils parser conflicts with legacy import assertions) | finance memo |
+| BUG-011 | Dashboard fee uses `created_at` not `effective_from` (245 vs 225) | High | fees | NEEDS REVIEW (fix changes the expected result of a locked test) | finance memo |
+| BUG-012 | Split payouts drop remainder fils | High | settlement/splits | FIXED (Go split tests passed) | finance memo |
 | BUG-013 | Scheme `amount` stored untruncated (always over) | High | scheme export | FIXED (`90d4e06`) | finance memo; details in BUG-038.md |
-| BUG-014 | Admin balance rebuild reads scheme lines not ledger | High | ledger/refresh | FIXED | FP-203 |
-| BUG-015 | MDR recalc rewrites paid batches | High | recalculate_mdr | FIXED | finance memo |
-| BUG-016 | Daemon uses UTC date so close is ~03:00 Bahrain | High | scheduler | FIXED | finance memo |
-| BUG-017 | March sweep posts again on rerun | High | scripts | FIXED | finance memo |
-| BUG-018 | Admin tool clears `test_mode` | High | merchantFlags | FIXED | finance memo |
-| BUG-019 | Expired payment links payable via `submittedAt` | Critical | payment links | FIXED | FP-187 |
-| BUG-020 | Cancel payment link not scoped to merchant | High | payment links | FIXED | finance memo |
-| BUG-021 | Login OTP bound to first matching email across merchants | High | auth | FIXED | OTP |
-| BUG-022 | `live_sessions` includes pending (pre-OTP) sessions | Critical | auth/db | FIXED | “login without OTP” |
-| BUG-023 | Webhook signs canonical JSON, sends `JSON.stringify` | High | webhooks | FIXED | FP-240 |
-| BUG-024 | Duplicate `settlement.paid` (no unique, two scanners) | High | payout notify | FIXED | 2026-08-21 |
+| BUG-014 | Admin balance rebuild reads scheme lines not ledger | High | ledger/refresh | NEEDS REVIEW (ledger implementation change fails existing refresh fixtures) | FP-203 |
+| BUG-015 | MDR recalc rewrites paid batches | High | recalculate_mdr | NOT REPRODUCED (current query selects only `closed`) | finance memo |
+| BUG-016 | Daemon uses UTC date so close is ~03:00 Bahrain | High | scheduler | FIXED (scheduler tests passed) | finance memo |
+| BUG-017 | March sweep posts again on rerun | High | scripts | UNVERIFIED (description guard added; no rerun regression yet) | finance memo |
+| BUG-018 | Admin tool clears `test_mode` | High | merchantFlags | FIXED (unit regression passed) | finance memo |
+| BUG-019 | Expired payment links payable via `submittedAt` | Critical | payment links | FIXED (route regression passed) | FP-187 |
+| BUG-020 | Cancel payment link not scoped to merchant | High | payment links | FIXED (details in BUG-040.md) | finance memo |
+| BUG-021 | Login OTP bound to first matching email across merchants | High | auth | FIXED (details in BUG-041.md) | OTP |
+| BUG-022 | `live_sessions` includes pending (pre-OTP) sessions | Critical | auth/db | FIXED (0074 view verified) | “login without OTP” |
+| BUG-023 | Webhook signs canonical JSON, sends `JSON.stringify` | High | webhooks | FIXED (signed delivery regression passed) | FP-240 |
+| BUG-024 | Duplicate `settlement.paid` (no unique, two scanners) | High | payout notify | FIXED (details in BUG-042.md) | 2026-08-21 |
 | BUG-025 | `NetPayableFils` used float32 | High | settlement | FIXED (`90d4e06`) | money; details in BUG-037.md |
 | BUG-026 | Refund 501 stub; refundable used authorized not captured | High | refunds | FIXED (`90d4e06`, FP-300) | FP-209 / FP-300; details in BUG-030.md / BUG-032.md |
 | BUG-027 | Concurrent refunds overspend remaining captured | High | refunds | FIXED (`90d4e06`) | FP-209; details in BUG-033.md |
-| BUG-028 | Promotional discount parser uses `* 100` | Medium | discountAdjustment | FIXED | finance memo |
+| BUG-028 | Promotional discount parser uses `* 100` | Medium | discountAdjustment | FIXED (discount integration suite passed) | finance memo |
 | BUG-029 | Payment-link finalize miss returned 200 after capture | High | payment links | FIXED | 2026-05-14 |
 | BUG-030 | Refund API stub lacked merchant route validation and UI wiring | Critical | refunds | FIXED (`90d4e06`) | FP-300; details in BUG-030.md |
 | BUG-031 | Refund transaction lookup omitted merchant ownership | Critical | refunds | FIXED (`90d4e06`) | FP-300; details in BUG-031.md |
@@ -41,6 +41,9 @@ Verified against code and tests. Case files were leads, not proof.
 | BUG-035 | Refund success events were not eligible for webhook delivery | High | webhooks | FIXED (`90d4e06`) | FP-300; details in BUG-035.md |
 | BUG-036 | Refund reporting schema and Bahrain-day rollup were incomplete | High | reporting | FIXED (`90d4e06`) | FP-300; details in BUG-036.md |
 | BUG-039 | Node service image could not install dependencies | High | operations | FIXED | deployment build; details in BUG-039.md |
+| BUG-040 | Payment-link cancellation was not merchant-scoped | High | payment links | FIXED (verified) | BUG-020 |
+| BUG-041 | Login OTP could target a different merchant account sharing the email | High | auth | FIXED (verified) | BUG-021 |
+| BUG-042 | Concurrent notification scans could race on `settlement.paid` | High | settlement | FIXED (verified) | BUG-024 |
 
 ## Not a bug / left unchanged
 

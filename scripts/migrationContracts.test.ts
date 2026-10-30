@@ -23,6 +23,19 @@ test("0072 refund summary joins refunds to their owning transaction", () => {
   assert.doesNotMatch(migration, /JOIN transactions t ON t\.id = r\.id\b/);
 });
 
+test("0074 live session view excludes sessions that have not completed OTP", () => {
+  const migration = readFileSync(join(migrationsDir, "0074_live_sessions_authenticated.sql"), "utf8");
+  assert.match(migration, /CREATE OR REPLACE VIEW live_sessions/);
+  assert.match(migration, /AND authenticated/);
+});
+
+test("0075 permits only one settlement.paid outbox event per batch", () => {
+  const migration = readFileSync(join(migrationsDir, "0075_outbox_settlement_paid_unique.sql"), "utf8");
+  assert.match(migration, /CREATE UNIQUE INDEX IF NOT EXISTS/);
+  assert.match(migration, /ON outbox_events \(aggregate_id\)/);
+  assert.match(migration, /WHERE event_type = 'settlement\.paid'/);
+});
+
 test("Compose has buildable service images and does not publish Postgres off-host", () => {
   const compose = readFileSync(join(migrationsDir, "..", "..", "ops", "docker-compose.yml"), "utf8");
   const opsDir = join(migrationsDir, "..", "..", "ops");

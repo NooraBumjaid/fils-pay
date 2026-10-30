@@ -201,7 +201,7 @@ test("pay charges exactly the link's own amount — the request body carries no 
   assert.equal(Number(txnRow.rows[0]!.captured_fils), 9_999);
 });
 
-// only without submittedAt. with a past submittedAt it pays — that's the terminal case (FH)
+// A client-provided past timestamp must never bypass the server-side expiry check.
 test("expired link is rejected: read reports 'expired', pay is rejected 410", async () => {
   const { rawKey, merchantId } = await createApprovedMerchantWithApiKey("expired");
   const link = await createLink(rawKey, merchantId, {
@@ -217,6 +217,32 @@ test("expired link is rejected: read reports 'expired', pay is rejected 410", as
   const payRes = await pay(link.token, APPROVED_CARD);
   assert.equal(payRes.statusCode, 410, payRes.body);
   assert.equal(payRes.json().error, "payment_link_expired");
+
+  const bypassRes = await app.inject({
+    method: "POST",
+    url: `/v1/payment-links/${link.token}/pay`,
+    headers: { "idempotency-key": randomUUID() },
+    payload: { card: APPROVED_CARD, submittedAt: "2020-01-01T00:00:00.000Z" },
+  });
+  assert.equal(bypassRes.statusCode, 410, bypassRes.body);
+  assert.equal(bypassRes.json().error, "payment_link_expired");
+});
+
+test("a merchant cannot cancel another merchant's payment link", async () => {
+  const owner = await createApprovedMerchantWithApiKey("cancel-owner");
+  const caller = await createApprovedMerchantWithApiKey("cancel-caller");
+  const link = await createLink(owner.rawKey, owner.merchantId, {});
+
+  const crossMerchantCancel = await app.inject({
+    method: "DELETE",
+    url: `/v1/merchants/${caller.merchantId}/payment-links/${link.id}`,
+    headers: authHeader(caller.rawKey),
+  });
+  assert.equal(crossMerchantCancel.statusCode, 404, crossMerchantCancel.body);
+
+  const stillActive = await getPublicLink(link.token);
+  assert.equal(stillActive.statusCode, 200);
+  assert.equal(stillActive.json().status, "active");
 });
 
 test("canceled link is rejected via both read and pay", async () => {

@@ -178,6 +178,34 @@ test("a second merchant sharing the same owner email resolves correctly via requ
   assert.equal(cross.json().error, "invalid_credentials");
 });
 
+test("OTP issued during login is bound to the merchant account whose password was verified", async () => {
+  const email = uniqueEmail("otp-shared");
+  const { merchantId: merchantAId } = await signup("otp-shared-a", "merchant-a-password-1234", email);
+  const { merchantId: merchantBId } = await signup("otp-shared-b", "merchant-b-password-5678", email);
+
+  const login = await app.inject({
+    method: "POST",
+    url: "/v1/auth/login",
+    payload: { merchantId: merchantBId, email, password: "merchant-b-password-5678" },
+  });
+  assert.equal(login.statusCode, 200, login.body);
+  const body = login.json() as { devOtpCode: string };
+  const cookie = parseCookie(login.headers["set-cookie"]);
+
+  const verify = await app.inject({
+    method: "POST",
+    url: "/v1/auth/otp/verify",
+    headers: { cookie },
+    payload: { code: body.devOtpCode },
+  });
+  assert.equal(verify.statusCode, 200, verify.body);
+
+  const me = await app.inject({ method: "GET", url: "/v1/auth/me", headers: { cookie } });
+  assert.equal(me.statusCode, 200, me.body);
+  assert.equal(me.json().merchant.id, merchantBId);
+  assert.notEqual(merchantAId, merchantBId);
+});
+
 test("login resolves the OTP recipient to the same account that was authenticated", async () => {
   const { merchantId, cookie } = await signupLoginAndVerify("recipient-sanity");
 

@@ -103,6 +103,31 @@ func TestEnqueuePayoutNotificationsIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestEnqueuePayoutNotificationsConcurrentScansRemainIdempotent(t *testing.T) {
+	pool := mustPool(t)
+	ctx := context.Background()
+
+	merchantID := insertActiveMerchant(t, pool, 250)
+	paidBatch := insertBatch(t, pool, merchantID, time.Date(2026, 3, 6, 0, 0, 0, 0, time.UTC), "paid", 12_500)
+
+	errs := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			_, err := EnqueuePayoutNotifications(ctx, pool)
+			errs <- err
+		}()
+	}
+	for i := 0; i < 2; i++ {
+		if err := <-errs; err != nil {
+			t.Fatalf("concurrent EnqueuePayoutNotifications: %v", err)
+		}
+	}
+
+	if got := countPaidEvents(t, pool, paidBatch); got != 1 {
+		t.Fatalf("concurrent scans must enqueue exactly one event, got %d", got)
+	}
+}
+
 func TestEnqueuePayoutNotificationsSkipsIneligibleBatches(t *testing.T) {
 	pool := mustPool(t)
 	ctx := context.Background()

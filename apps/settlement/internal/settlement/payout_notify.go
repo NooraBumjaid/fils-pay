@@ -83,14 +83,21 @@ func EnqueuePayoutNotifications(ctx context.Context, db *pgxpool.Pool) (int, err
 		if err != nil {
 			return count, fmt.Errorf("settlement: EnqueuePayoutNotifications: marshal payload: %w", err)
 		}
-		_, err = db.Exec(ctx, `
+		tag, err := db.Exec(ctx, `
 			INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload)
-			VALUES ('settlement.paid', 'settlement_batch', $1, $2)
+			SELECT 'settlement.paid', 'settlement_batch', $1, $2
+			 WHERE NOT EXISTS (
+			   SELECT 1 FROM outbox_events
+			    WHERE event_type = 'settlement.paid' AND aggregate_id = $1
+			 )
+			ON CONFLICT (aggregate_id) WHERE event_type = 'settlement.paid' DO NOTHING
 		`, b.id, payload)
 		if err != nil {
 			return count, fmt.Errorf("settlement: EnqueuePayoutNotifications: insert batch %s: %w", b.id, err)
 		}
-		count++
+		if tag.RowsAffected() > 0 {
+			count++
+		}
 	}
 	return count, nil
 }

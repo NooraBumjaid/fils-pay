@@ -87,7 +87,8 @@ func PayoutSplitBatch(ctx context.Context, db *pgxpool.Pool, batchID uuid.UUID) 
 		return SplitPayoutResult{}, err
 	}
 
-	var shares []ChildShare
+	var weights []ChildWeight
+	var childIDs []uuid.UUID
 	for rows.Next() {
 		var childID uuid.UUID
 		var weightBps int64
@@ -95,14 +96,24 @@ func PayoutSplitBatch(ctx context.Context, db *pgxpool.Pool, batchID uuid.UUID) 
 			rows.Close()
 			return SplitPayoutResult{}, err
 		}
-		share := money.ApplyRateFils(money.Fils(netPayout), weightBps)
-		shares = append(shares, ChildShare{ChildMerchantID: childID, WeightBps: weightBps, AllocatedFils: share})
+		childIDs = append(childIDs, childID)
+		weights = append(weights, ChildWeight{WeightBps: weightBps})
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
 		return SplitPayoutResult{}, err
 	}
 	rows.Close()
+
+	amounts := ChildShares(money.Fils(netPayout), weights)
+	shares := make([]ChildShare, 0, len(childIDs))
+	for i, childID := range childIDs {
+		shares = append(shares, ChildShare{
+			ChildMerchantID: childID,
+			WeightBps:       weights[i].WeightBps,
+			AllocatedFils:   amounts[i],
+		})
+	}
 
 	var totalAllocated money.Fils
 	for _, s := range shares {
