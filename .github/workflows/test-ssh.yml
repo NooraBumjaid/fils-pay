@@ -1,0 +1,44 @@
+name: Test SSH
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ssh-check:
+    name: Whoami on Dilmune
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Connect and run whoami
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOST: ${{ secrets.SSH_KNOWN_HOST }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${SSH_HOST:-}" || -z "${SSH_USER:-}" || -z "${SSH_PRIVATE_KEY:-}" || -z "${SSH_KNOWN_HOST:-}" ]]; then
+            echo "Missing SSH_HOST, SSH_USER, SSH_PRIVATE_KEY, or SSH_KNOWN_HOST" >&2
+            exit 1
+          fi
+          umask 077
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$SSH_KNOWN_HOST" >"$HOME/.ssh/known_hosts"
+          printf '%s\n' "$SSH_PRIVATE_KEY" >"$HOME/.ssh/dilmune_test"
+          remote="${SSH_USER}@${SSH_HOST}"
+          remote_user="$(
+            ssh \
+              -i "$HOME/.ssh/dilmune_test" \
+              -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+              -o BatchMode=yes \
+              -o LogLevel=ERROR \
+              "$remote" \
+              whoami
+          )"
+          shred -u "$HOME/.ssh/dilmune_test" 2>/dev/null || rm -f "$HOME/.ssh/dilmune_test"
+          echo "SSH connectivity OK as ${remote_user}"
