@@ -1,9 +1,9 @@
 # BUG-001 Audit Report — Broken Database Migration
 
-**Project:** FilsPay Reboot01  
-**Bug ID:** BUG-001  
-**Date:** 2026-10-29  
-**Auditor:** PostgreSQL / backend fix (local Compose DB)  
+**Project:** FilsPay Reboot01
+**Bug ID:** BUG-001
+**Date:** 2026-10-29
+**Auditor:** PostgreSQL / backend fix (local Compose DB)
 **Status:** Fixed in `db/migrations/0054_views.sql`. Not committed.
 
 ---

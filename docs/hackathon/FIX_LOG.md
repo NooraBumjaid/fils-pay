@@ -1,8 +1,8 @@
 # BUG-001 Fix Log
 
-**Bug:** Broken migration `0054_views.sql` (`settlement_batch_events` does not exist)  
-**Date:** 2026-10-29  
-**Change type:** One-line SQL correction in an unapplied migration  
+**Bug:** Broken migration `0054_views.sql` (`settlement_batch_events` does not exist)
+**Date:** 2026-10-29
+**Change type:** One-line SQL correction in an unapplied migration
 **Commit:** none (not committed, not pushed)
 
 ---

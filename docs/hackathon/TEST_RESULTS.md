@@ -1,8 +1,8 @@
 # BUG-001 Test Results
 
-**Date:** 2026-10-29  
-**Host:** Windows 10, PowerShell, Node v24.19.0  
-**Database:** isolated local Compose Postgres 16 (`ops-postgres-1`)  
+**Date:** 2026-10-29
+**Host:** Windows 10, PowerShell, Node v24.19.0
+**Database:** isolated local Compose Postgres 16 (`ops-postgres-1`)
 **Connection used for migrate/tests:** `postgres://filspay:filspay_dev_password@localhost:5432/filspay?sslmode=disable`
 
 This file records **actual** outcomes. Tests that were not executed are marked **PENDING**.
@@ -91,7 +91,7 @@ The view matches the preserved `event_type = 'captured'` filter. CloseBatch-styl
 
 ## 4. `npm test`
 
-**Command:** `npm test` with `DATABASE_URL` pointing at the local Compose DB.  
+**Command:** `npm test` with `DATABASE_URL` pointing at the local Compose DB.
 **Overall:** FAIL (workspace failures). Duration ~33s for the workspace run.
 
 Root script is `npm run test --workspaces --if-present && tsx --test scripts/*.test.ts`. Workspace failures therefore skipped the trailing `scripts/*.test.ts` invocation. Those script tests were run separately afterward (section 5).
