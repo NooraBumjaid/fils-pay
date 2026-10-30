@@ -1,15 +1,21 @@
 import type { ApiErrorBody } from "../types.js";
+import {
+  resolveDevApiBase,
+  resolveDevWebBase,
+  resolveProductionApiBase,
+  resolveProductionWebBase,
+} from "./apiBase.js";
 
-const API_BASE_URL =
-  (import.meta.env.VITE_ADMIN_API_BASE_URL as string | undefined) ??
-  (import.meta.env.PROD ? "" : "http://localhost:3000");
+const API_BASE_URL = import.meta.env.PROD
+  ? resolveProductionApiBase(import.meta.env.VITE_ADMIN_API_BASE_URL)
+  : resolveDevApiBase(import.meta.env.VITE_ADMIN_API_BASE_URL);
 
 /** apps/web's own dashboard origin — where a "view as merchant" grant is
  *  actually exercised. */
 // FH: used to build the impersonation link
-export const WEB_BASE_URL =
-  (import.meta.env.VITE_WEB_BASE_URL as string | undefined) ??
-  (import.meta.env.PROD ? "/" : "http://localhost:5173");
+export const WEB_BASE_URL = import.meta.env.PROD
+  ? resolveProductionWebBase(import.meta.env.VITE_WEB_BASE_URL)
+  : resolveDevWebBase(import.meta.env.VITE_WEB_BASE_URL);
 
 /** Mirrors apps/api's own uniform `{ error, message? }` body
  *  (lib/errors.ts / plugins/errorHandler.ts) — one error shape end to

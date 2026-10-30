@@ -46,6 +46,9 @@ jobs:
         env:
           VITE_BASE: /admin/
 
+      - name: Production SPA bundles must not call localhost API
+        run: npx tsx --test --test-concurrency=1 apps/web/src/api/apiBase.new.test.ts apps/admin/src/api/apiBase.new.test.ts scripts/spa-production-api-base.new.test.ts
+
       - name: Validate Docker Compose (dummy env, no production secrets)
         run: |
           set -euo pipefail

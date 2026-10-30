@@ -1,8 +1,9 @@
 import type { ApiErrorBody } from "../types.js";
+import { resolveDevApiBase, resolveProductionApiBase } from "./apiBase.js";
 
-const API_BASE_URL =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
-  (import.meta.env.PROD ? "" : "http://localhost:3000");
+const API_BASE_URL = import.meta.env.PROD
+  ? resolveProductionApiBase(import.meta.env.VITE_API_BASE_URL)
+  : resolveDevApiBase(import.meta.env.VITE_API_BASE_URL);
 
 /** Mirrors apps/api's own uniform `{ error, message? }` body
  *  (lib/errors.ts / plugins/errorHandler.ts) — one error shape end to
