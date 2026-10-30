@@ -93,6 +93,74 @@ func TestRecalculateMDR_RecomputesAtCurrentRate(t *testing.T) {
 	}
 }
 
+func TestRecalculateMDR_PreservesRefundDebtOffset(t *testing.T) {
+	pool := mustPool(t)
+	ctx := context.Background()
+	const originalMdrBps = 250
+	merchantID := insertActiveMerchant(t, pool, originalMdrBps)
+	dayOne := time.Date(2026, 4, 12, 0, 0, 0, 0, time.UTC)
+	dayOneStart, _ := BusinessDayWindow(dayOne)
+	txnID, _ := insertCaptureEvent(t, pool, merchantID, originalMdrBps, 100_000, dayOneStart.Add(time.Hour))
+	first, err := CloseBatch(ctx, pool, merchantID, dayOne)
+	if err != nil {
+		t.Fatalf("close first batch: %v", err)
+	}
+	if _, err := PayoutBatch(ctx, pool, first.BatchID); err != nil {
+		t.Fatalf("pay first batch: %v", err)
+	}
+
+	dayTwo := dayOne.AddDate(0, 0, 1)
+	dayTwoStart, _ := BusinessDayWindow(dayTwo)
+	insertSucceededRefund(t, pool, merchantID, txnID, 50_000, 1_250, dayTwoStart.Add(time.Hour))
+	refundBatch, err := CloseBatch(ctx, pool, merchantID, dayTwo)
+	if err != nil {
+		t.Fatalf("close refund batch: %v", err)
+	}
+	if _, err := PayoutBatch(ctx, pool, refundBatch.BatchID); err != nil {
+		t.Fatalf("process refund batch: %v", err)
+	}
+
+	dayThree := dayTwo.AddDate(0, 0, 1)
+	dayThreeStart, _ := BusinessDayWindow(dayThree)
+	insertCaptureEvent(t, pool, merchantID, originalMdrBps, 60_000, dayThreeStart.Add(time.Hour))
+	third, err := CloseBatch(ctx, pool, merchantID, dayThree)
+	if err != nil {
+		t.Fatalf("close debt-offset batch: %v", err)
+	}
+
+	const newMdrBps = 350
+	if _, err := pool.Exec(ctx, `UPDATE merchants SET mdr_bps = $2 WHERE id = $1`, merchantID, newMdrBps); err != nil {
+		t.Fatalf("update mdr_bps: %v", err)
+	}
+	from, to := recalcWindow(dayThree)
+	if _, err := RecalculateMDR(ctx, pool, merchantID, from, to); err != nil {
+		t.Fatalf("RecalculateMDR: %v", err)
+	}
+
+	wantFee := ComputeSettlementFee(60_000, newMdrBps, 0)
+	wantPayout := third.GrossFils - wantFee - 48_750
+	var persistedNet int64
+	if err := pool.QueryRow(ctx, `SELECT net_payout_fils FROM settlement_batches WHERE id = $1`, third.BatchID).Scan(&persistedNet); err != nil {
+		t.Fatalf("read recalculated debt-offset payout: %v", err)
+	}
+	if persistedNet != int64(wantPayout) {
+		t.Fatalf("recalculated net payout = %d, want %d after preserving refund debt", persistedNet, wantPayout)
+	}
+	if _, err := PayoutBatch(ctx, pool, third.BatchID); err != nil {
+		t.Fatalf("pay recalculated batch: %v", err)
+	}
+	var payoutAmount int64
+	if err := pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(amount_fils), 0) FROM ledger_entries
+		 WHERE settlement_batch_id = $1 AND description = 'settlement payout: batch paid'
+	`, third.BatchID).Scan(&payoutAmount); err != nil {
+		t.Fatalf("read recalculated payout legs: %v", err)
+	}
+	if payoutAmount != int64(wantPayout)*2 {
+		t.Fatalf("payout legs total = %d, want %d across balanced debit/credit legs", payoutAmount, int64(wantPayout)*2)
+	}
+}
+
 // YA: the 0007 trigger also rejects UPDATE/DELETE on ledger_entries, so these groups can't be edited afterwards
 func TestRecalculateMDR_AdjustmentLedgerGroupBalances(t *testing.T) {
 	pool := mustPool(t)
