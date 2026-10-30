@@ -13,7 +13,7 @@ Verified against code and tests. Case files were leads, not proof.
 | BUG-007 | Compose did not load `ops/.env.docker` | High | ops | FIXED | deploy |
 | BUG-008 | Dev webhook encryption key wrong length | High | api/config | FIXED | deploy |
 | BUG-009 | Compose used committed DB password | High | ops | FIXED | security |
-| BUG-010 | CSV import treats BD as 2-decimal cents | Critical | admin CSV | NEEDS REVIEW (new fils parser conflicts with legacy import assertions) | finance memo |
+| BUG-010 | CSV import treated BHD as 2-decimal cents | Critical | admin CSV | FIXED (new end-to-end test; legacy assertions still encode cents) | finance memo; details in BUG-010.md |
 | BUG-011 | Dashboard fee uses `created_at` not `effective_from` (245 vs 225) | High | fees | NEEDS REVIEW (fix changes the expected result of a locked test) | finance memo |
 | BUG-012 | Split payouts drop remainder fils | High | settlement/splits | FIXED (Go split tests passed) | finance memo |
 | BUG-013 | Scheme `amount` stored untruncated (always over) | High | scheme export | FIXED (`90d4e06`) | finance memo; details in BUG-038.md |
