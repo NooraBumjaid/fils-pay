@@ -1,3 +1,13 @@
+# Test results — 2026-10-30 auditor round
+
+| Suite | Pass | Fail | Notes |
+|---|---:|---:|---|
+| New (writer actor, impersonation write, refunds support, KYC pdf-only) | 8 | 0 | |
+| Locked admin + KYC app + refunds + transactions | 77 | 0 | Includes impersonation read/write-gated routes |
+| Docker `go test -count=1 -short ./internal/ledger` | ok | 0 | rebuild lock + existing rebuild/refresh |
+
+---
+
 # Test results — 2026-10-30 document-driven batch
 
 **Host:** Windows, Node, Docker `golang:1.22-bookworm`  

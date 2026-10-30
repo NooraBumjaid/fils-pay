@@ -54,6 +54,14 @@ Verified against code and tests. Case files were leads, not proof.
 | BUG-050 | Webhook dispatcher selected due rows without `SKIP LOCKED` | High | webhooks | FIXED (claim lease + overlapping-pass test passed) | staging 2 replicas |
 | BUG-051 | Duplicate `settlement_payout_disbursements` per batch | High | payout rail | FIXED (`0078` unique + concurrent insert test passed) | 2026-08-21 |
 | BUG-052 | CloseBatch omitted ADR-0002 scheme residue journal | High | settlement/ledger | FIXED (Docker Go residue tests passed) | ADR-0002; finance memo |
+| BUG-053 | API key rotation never expired the previous key | High | admin API keys | FIXED (`revoke_after` + auth check; 24h overlap) | incident note |
+| BUG-054 | Support could create credits that post payable immediately | High | admin credits | FIXED (finance/super_admin on create) | incident note |
+| BUG-055 | Disabled admin kept impersonation grants | High | impersonation | FIXED (lookup requires `admin_users.status = active`) | incident note |
+| BUG-056 | Lifetime payout estimate drifted (`REAL`) | Medium | settlement | FIXED (`0079` BIGINT + int64 add) | finance memo |
+| BUG-057 | Support impersonation could capture/void/refund | Critical | impersonation | FIXED (writer actor rejects non-owner grants) | HANDOVER / ADMIN.md |
+| BUG-058 | Merchant support could POST `/v1/refunds` | High | refunds | FIXED (`requireMerchantRole` owner/finance) | RefundDrawer |
+| BUG-059 | RebuildAllBalances clobbered CloseBatch increment | High | settlement/cache | FIXED (`LOCK TABLE merchant_balances`) | YA TODO |
+| BUG-060 | JPEG named `.pdf` accepted as commercial_registration | High | KYC | FIXED (detected type must be pdf) | FH comment |
 
 ## Not a bug / left unchanged
 
@@ -69,10 +77,9 @@ Verified against code and tests. Case files were leads, not proof.
 
 | Item | Notes |
 |---|---|
-| Lifetime payout `REAL` column | Drift possible; monitoring only, not payout math |
-| Reporting `merchant_id` null | Consumer fails closed on malformed outbox payloads; producers send merchantId |
-| Key rotation UX | Rotate does not revoke the previous API key (tests lock overlap) |
-| Large export DoS | Date-range filter exists; full result is loaded in memory by design |
+| Reporting `merchant_id` null | Locked `runConsumerPass` atomicity test requires a throw; skipping poison pills would fail it. Producers send `merchantId`. |
+| Large CSV export in memory | Documented design; date filter bounds size. Streaming exists but AGENTS.md forbids wiring it without resumable frontend downloads. |
+| OTP session token not rotated on promote | YA session-fixation note. Locked login helpers reuse the pending cookie after verify; rotating the token would fail those tests. |
 
 ## FP-300
 

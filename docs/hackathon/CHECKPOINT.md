@@ -37,11 +37,11 @@ See `FP300_VERIFICATION.md`. API/ledger/webhook/settlement verified. UI and Dilm
 ## 4. Remaining risks
 
 1. Locked CSV tests still expect cents (`4.75` → 475) after BUG-010.
-2. Reporting consumer poison-pill `merchantId` null.
+2. Reporting consumer poison-pill `merchantId` null (locked atomicity test forbids skip).
 3. Dispatcher backoff jitter assertion flakes.
-4. Key rotation does not revoke the previous key.
-5. Admin IDOR / role matrix not re-audited line-by-line this pass.
-6. Hosted TLS: `COOKIE_SECURE=false` on HTTP Dilmune.
+4. OTP session token is not rotated on promote (locked login helpers reuse the pending cookie).
+5. Hosted TLS: `COOKIE_SECURE=false` on HTTP Dilmune.
+6. Super_admin impersonation (mapped to owner) can still write, per ADMIN.md / FP-178.
 
 ## 5. Deployment
 

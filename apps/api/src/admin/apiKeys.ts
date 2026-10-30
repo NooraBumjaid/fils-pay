@@ -35,6 +35,16 @@ export async function rotateApiKeyAsAdmin(
       rotatedFromKeyId: input.apiKeyId,
     });
 
+    // 24h overlap so the merchant can deploy the new key (0056). Auth
+    // rejects the old credential once revoke_after has passed, without
+    // setting revoked_at immediately.
+    await client.query(
+      `UPDATE api_keys
+          SET revoke_after = now() + interval '24 hours'
+        WHERE id = $1 AND merchant_id = $2 AND revoked_at IS NULL`,
+      [input.apiKeyId, input.merchantId],
+    );
+
     await insertAdminAuditLog(client, {
       adminUserId: input.adminUserId,
       action: "api_key_rotate",

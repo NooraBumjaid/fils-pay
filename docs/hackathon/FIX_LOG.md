@@ -1,3 +1,16 @@
+# Fix log — 2026-10-30 auditor round (impersonation, refunds, rebuild, KYC)
+
+Do not push. Fallback SHA: `7a84622`.
+
+| ID | Change | Files |
+|---|---|---|
+| BUG-057 | Writer actor rejects non-owner impersonation | `requireMerchantAuth.ts`, `impersonation.write.new.test.ts`, `requireMerchantWriterActor.new.test.ts` |
+| BUG-058 | Refunds gated owner/finance | `refunds.ts`, `refunds.support.new.test.ts` |
+| BUG-059 | Lock `merchant_balances` during rebuild/refresh | `rebuild.go`, `refresh.go`, `rebuild_lock_test.go` |
+| BUG-060 | PDF-only KYC requires PDF magic bytes | `kyc.ts`, `kyc.pdfOnly.new.test.ts` |
+
+---
+
 # Fix log — 2026-10-30 batch (FP-201, dispatcher, residue, fee display)
 
 Do not push. Fallback SHA: `7a84622`.

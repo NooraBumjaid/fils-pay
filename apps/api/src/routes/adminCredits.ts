@@ -58,6 +58,11 @@ export async function adminCreditRoutes(app: FastifyInstance): Promise<void> {
         });
       },
     );
+  });
+
+  app.register(async (scope) => {
+    scope.addHook("preHandler", requireAdminSession);
+    scope.addHook("preHandler", requireAdminRole("finance", "super_admin"));
 
     scope.post<{ Params: MerchantIdParams; Body: unknown }>(
       "/merchants/:id/credits",
@@ -75,11 +80,6 @@ export async function adminCreditRoutes(app: FastifyInstance): Promise<void> {
         reply.code(201).send(record);
       },
     );
-  });
-
-  app.register(async (scope) => {
-    scope.addHook("preHandler", requireAdminSession);
-    scope.addHook("preHandler", requireAdminRole("finance", "super_admin"));
 
     scope.post<{ Params: CreditRequestIdParams }>(
       "/credits/:creditRequestId/approve",

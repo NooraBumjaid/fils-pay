@@ -48,6 +48,18 @@ func (d RebuildDiff) Changed() bool {
 	return d.CachedBefore != d.Rebuilt
 }
 
+// lockBalanceCache serialises a full cache rewrite against CloseBatch's
+// incremental merchant_balances update. SHARE ROW EXCLUSIVE conflicts with
+// the ROW EXCLUSIVE lock taken by INSERT/UPDATE, so ApplyBatchClose waits
+// until this transaction commits instead of having its increment overwritten.
+func lockBalanceCache(ctx context.Context, tx pgx.Tx) error {
+	_, err := tx.Exec(ctx, `LOCK TABLE merchant_balances IN SHARE ROW EXCLUSIVE MODE`)
+	if err != nil {
+		return fmt.Errorf("ledger: lock merchant_balances: %w", err)
+	}
+	return nil
+}
+
 // RebuildAllBalances recomputes every merchant's balance the same way and
 // overwrites merchant_balances in one transaction. Returns the full
 // before/after map so a caller (the rebuild-balances CLI subcommand) can
@@ -60,6 +72,10 @@ func RebuildAllBalances(ctx context.Context, db *pgxpool.Pool) (map[uuid.UUID]Re
 		return nil, fmt.Errorf("ledger: RebuildAllBalances: begin: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if err := lockBalanceCache(ctx, tx); err != nil {
+		return nil, err
+	}
 
 	rows, err := tx.Query(ctx, `
 		SELECT DISTINCT merchant_id FROM (
@@ -86,7 +102,6 @@ func RebuildAllBalances(ctx context.Context, db *pgxpool.Pool) (map[uuid.UUID]Re
 	}
 	rows.Close()
 
-	// TODO: lock merchant_balances rows first, a concurrent CloseBatch increment gets clobbered -- YA
 	diffs := make(map[uuid.UUID]RebuildDiff, len(merchantIDs))
 
 	for _, merchantID := range merchantIDs {

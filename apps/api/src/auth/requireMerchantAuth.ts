@@ -126,7 +126,13 @@ export interface MerchantWriterActor {
  */
 // impersonation writes get recorded as merchant_session here — audit cant tell admin from merchant? — am
 // YA: impersonation can't reach write routes, so this never sees admin_impersonation
+// HANDOVER: impersonation is read-only. ADMIN.md: only super_admin (mapped to
+// merchant-plane owner) may write while viewing as a merchant. Capture/void/
+// refund have no requireMerchantRole, so this is the write gate for grants.
 export function requireMerchantWriterActor(auth: MerchantAuthContext): MerchantWriterActor {
+  if (auth.actorType === "admin_impersonation" && auth.role !== "owner") {
+    throw new ForbiddenError("forbidden");
+  }
   if (auth.actorType === "merchant_api_key") {
     return { type: "merchant_api_key", id: auth.actorId };
   }

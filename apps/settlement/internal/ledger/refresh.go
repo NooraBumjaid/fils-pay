@@ -21,6 +21,10 @@ func RefreshBalanceCache(ctx context.Context, db *pgxpool.Pool) (map[uuid.UUID]R
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
+	if err := lockBalanceCache(ctx, tx); err != nil {
+		return nil, err
+	}
+
 	rows, err := tx.Query(ctx, `
 		SELECT DISTINCT merchant_id FROM (
 			SELECT merchant_id FROM merchant_payable_position

@@ -91,6 +91,8 @@ export async function transactionRoutes(app: FastifyInstance): Promise<void> {
     // am: requireMerchantAuth lets impersonation through here too? an admin impersonating can capture
     // MK: impersonation is read-only, enforced in requireMerchantAuth. fine
     // MK: confirmed — ADMIN.md says grants are support-level read only
+    // Writer actor now refuses non-owner impersonation (HANDOVER read-only;
+    // ADMIN.md: only super_admin mapped to owner may write).
     "/:id/capture",
     { preHandler: requireMerchantAuth },
     async (request, reply) => {
