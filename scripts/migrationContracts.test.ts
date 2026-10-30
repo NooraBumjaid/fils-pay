@@ -36,6 +36,12 @@ test("0075 permits only one settlement.paid outbox event per batch", () => {
   assert.match(migration, /WHERE event_type = 'settlement\.paid'/);
 });
 
+test("0076 restores a negative platform volume counter to the earned tier threshold", () => {
+  const migration = readFileSync(join(migrationsDir, "0076_platform_volume_tier_overflow.sql"), "utf8");
+  assert.match(migration, /SET total_processed_fils = 2000000000/);
+  assert.match(migration, /WHERE total_processed_fils < 0/);
+});
+
 test("Compose has buildable service images and does not publish Postgres off-host", () => {
   const compose = readFileSync(join(migrationsDir, "..", "..", "ops", "docker-compose.yml"), "utf8");
   const opsDir = join(migrationsDir, "..", "..", "ops");

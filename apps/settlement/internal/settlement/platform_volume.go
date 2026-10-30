@@ -23,10 +23,22 @@ func ReadAndLockPlatformProcessedFils(ctx context.Context, tx pgx.Tx) (int32, er
 // happens here rather than as SQL `SET x = x + $2` so the value written is
 // derived from exactly the value this batch's fee calculation read.
 func RecordPlatformProcessedVolume(ctx context.Context, tx pgx.Tx, current int32, batchGrossFils int64) error {
-	updated := current + int32(batchGrossFils)
+	// The counter exists only to grant the one-time volume tier. Saturate at
+	// that threshold so the INTEGER column cannot wrap and revoke an earned
+	// tier after enough lifetime volume.
+	const threshold int64 = 2_000_000_000
+	updated := int64(current)
+	if updated < 0 || updated >= threshold {
+		updated = threshold
+	} else {
+		updated += batchGrossFils
+		if updated > threshold {
+			updated = threshold
+		}
+	}
 	_, err := tx.Exec(ctx, `
 		UPDATE platform_stats SET total_processed_fils = $1, updated_at = now() WHERE id = 1
-	`, updated)
+	`, int32(updated))
 	return err
 }
 
@@ -39,7 +51,7 @@ func RecordPlatformProcessedVolume(ctx context.Context, tx pgx.Tx, current int32
 func VolumeTierMdrBonusBps(totalProcessedFils int32) int64 {
 	const volumeTierThresholdFils int32 = 2_000_000_000 // 2,000,000.000 BD
 	const volumeTierBonusBps int64 = 15                 // 0.15%
-	if totalProcessedFils >= volumeTierThresholdFils {
+	if totalProcessedFils < 0 || totalProcessedFils >= volumeTierThresholdFils {
 		return volumeTierBonusBps
 	}
 	return 0

@@ -47,6 +47,7 @@ Verified against code and tests. Case files were leads, not proof.
 | BUG-043 | Refund-created negative payable was not carried into later payouts | Critical | settlement/refunds | FIXED (focused DB regression passed) | FP-300; details in BUG-043.md |
 | BUG-044 | Merchant/admin OTP guess limits were bypassable under concurrency and resend | Critical | authentication | FIXED (parallel route regressions passed) | details in BUG-044.md |
 | BUG-045 | Settlement repriced captures using the later platform volume tier | Critical | payments/settlement | FIXED (focused DB regression passed) | details in BUG-045.md |
+| BUG-046 | int4 volume counter overflow revoked the earned platform tier | High | settlement/pricing | FIXED (saturation, recovery migration, DB regressions passed) | details in BUG-046.md |
 
 ## Not a bug / left unchanged
 

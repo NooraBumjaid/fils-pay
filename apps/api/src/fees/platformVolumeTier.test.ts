@@ -58,3 +58,8 @@ test("the tier stays granted above the threshold", async () => {
   await setTotal(2_100_000_000);
   assert.equal(await withClient(getVolumeTierBonusBps), 15);
 });
+
+test("a legacy negative overflow counter does not revoke the earned tier", async () => {
+  await setTotal(-1);
+  assert.equal(await withClient(getVolumeTierBonusBps), 15);
+});

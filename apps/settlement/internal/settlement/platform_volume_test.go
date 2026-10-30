@@ -66,4 +66,46 @@ func TestVolumeTierMdrBonusBps_BelowAndAtThreshold(t *testing.T) {
 	if got := VolumeTierMdrBonusBps(2_000_000_000); got != 15 {
 		t.Errorf("exactly at threshold: got %d, want 15", got)
 	}
+	if got := VolumeTierMdrBonusBps(-1); got != 15 {
+		t.Errorf("negative overflow sentinel: got %d, want 15", got)
+	}
+}
+
+func TestRecordPlatformProcessedVolume_SaturatesAtTierThreshold(t *testing.T) {
+	pool := mustPool(t)
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if err := RecordPlatformProcessedVolume(ctx, tx, 1_999_999_999, 50_000); err != nil {
+		t.Fatalf("record crossing batch: %v", err)
+	}
+	var total int32
+	if err := tx.QueryRow(ctx, `SELECT total_processed_fils FROM platform_stats WHERE id = 1`).Scan(&total); err != nil {
+		t.Fatalf("read saturated counter: %v", err)
+	}
+	if total != 2_000_000_000 {
+		t.Fatalf("counter after crossing tier = %d, want 2000000000", total)
+	}
+	if err := RecordPlatformProcessedVolume(ctx, tx, total, 100_000_000); err != nil {
+		t.Fatalf("record post-tier batch: %v", err)
+	}
+	if err := tx.QueryRow(ctx, `SELECT total_processed_fils FROM platform_stats WHERE id = 1`).Scan(&total); err != nil {
+		t.Fatalf("read post-tier counter: %v", err)
+	}
+	if total != 2_000_000_000 {
+		t.Fatalf("counter after post-tier volume = %d, want saturated 2000000000", total)
+	}
+	if err := RecordPlatformProcessedVolume(ctx, tx, -1, 100_000); err != nil {
+		t.Fatalf("recover legacy negative overflow counter: %v", err)
+	}
+	if err := tx.QueryRow(ctx, `SELECT total_processed_fils FROM platform_stats WHERE id = 1`).Scan(&total); err != nil {
+		t.Fatalf("read recovered counter: %v", err)
+	}
+	if total != 2_000_000_000 {
+		t.Fatalf("recovered counter = %d, want saturated tier threshold 2000000000", total)
+	}
 }
