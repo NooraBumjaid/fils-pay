@@ -17,9 +17,8 @@ const VOLUME_TIER_BONUS_BPS = 15; // 0.15%
  */
 /**
  * @returns 15 when the lifetime counter has reached the threshold, else 0.
- * Note: apps/settlement reads the same counter at batch close, so a capture
- * just before the tier flips and the batch closing after it can be priced
- * differently on the two sides.
+ * Settlement uses each capture event's recorded fee, so a tier transition
+ * between capture and batch close cannot reprice that capture.
  */
 export async function getVolumeTierBonusBps(client: PoolClient): Promise<number> {
   const result = await client.query<{ total_processed_fils: number }>(

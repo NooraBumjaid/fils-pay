@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -45,10 +46,12 @@ type PayoutResult struct {
 }
 
 type eligibleEvent struct {
-	id            int64
-	transactionID uuid.UUID
-	amountFils    money.Fils
-	occurredAt    time.Time
+	id              int64
+	transactionID   uuid.UUID
+	amountFils      money.Fils
+	capturedFeeFils money.Fils
+	hasCapturedFee  bool
+	occurredAt      time.Time
 }
 
 // CloseBatch computes and freezes settlement figures for one merchant's
@@ -150,7 +153,8 @@ func CloseBatch(ctx context.Context, db *pgxpool.Pool, merchantID uuid.UUID, bus
 	// incremental delta capture.ts already recorded for that one real
 	// event — never from transactions.captured_fils (a running total).
 	rows, err := tx.Query(ctx, `
-		SELECT te.id, te.transaction_id, te.amount_fils, te.occurred_at
+		SELECT te.id, te.transaction_id, te.amount_fils, te.occurred_at,
+		       COALESCE(te.metadata->>'feeFils', '')
 		  FROM transaction_events te
 		  JOIN transactions t ON t.id = te.transaction_id
 		 WHERE t.merchant_id = $1
@@ -170,11 +174,21 @@ func CloseBatch(ctx context.Context, db *pgxpool.Pool, merchantID uuid.UUID, bus
 	for rows.Next() {
 		var e eligibleEvent
 		var amountFils int64
-		if err := rows.Scan(&e.id, &e.transactionID, &amountFils, &e.occurredAt); err != nil {
+		var capturedFeeRaw string
+		if err := rows.Scan(&e.id, &e.transactionID, &amountFils, &e.occurredAt, &capturedFeeRaw); err != nil {
 			rows.Close()
 			return BatchResult{}, fmt.Errorf("settlement: CloseBatch: scan eligible event: %w", err)
 		}
 		e.amountFils = money.Fils(amountFils)
+		if capturedFeeRaw != "" {
+			capturedFee, err := strconv.ParseInt(capturedFeeRaw, 10, 64)
+			if err != nil || capturedFee < 0 {
+				rows.Close()
+				return BatchResult{}, fmt.Errorf("settlement: CloseBatch: invalid capture fee metadata on event %d: %q", e.id, capturedFeeRaw)
+			}
+			e.capturedFeeFils = money.Fils(capturedFee)
+			e.hasCapturedFee = true
+		}
 		events = append(events, e)
 		if !seenTxn[e.transactionID] {
 			seenTxn[e.transactionID] = true
@@ -225,9 +239,9 @@ func CloseBatch(ctx context.Context, db *pgxpool.Pool, merchantID uuid.UUID, bus
 		grouped[e.transactionID] = append(grouped[e.transactionID], e)
 	}
 
-	// Step 8: for each transaction group, and for the batch as a whole.
-	// Fee is recomputed PER EVENT, then summed — never ApplyRateFils
-	// applied once to the pre-summed total.
+	// Step 8: sum exact capture-time fees where available. Legacy events
+	// without fee metadata use a per-event recomputation fallback; rates are
+	// never applied to a pre-summed transaction total.
 	type txnLine struct {
 		transactionID uuid.UUID
 		grossFils     money.Fils
@@ -241,6 +255,11 @@ func CloseBatch(ctx context.Context, db *pgxpool.Pool, merchantID uuid.UUID, bus
 		var grossForTxn, feeForTxn money.Fils
 		for _, e := range grouped[txnID] {
 			grossForTxn += e.amountFils
+			if e.hasCapturedFee {
+				feeForTxn += e.capturedFeeFils
+				eventIDs = append(eventIDs, e.id)
+				continue
+			}
 			effectiveMdrBps := EffectiveMdrBpsAt(schedules, e.occurredAt, mdrBps)
 			if effectiveMdrBps -= tierBonusBps; effectiveMdrBps < 0 {
 				effectiveMdrBps = 0

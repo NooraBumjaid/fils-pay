@@ -204,6 +204,54 @@ func TestCloseBatch_NetsSuccessfulRefundsIntoNextPayout(t *testing.T) {
 	}
 }
 
+func TestCloseBatch_UsesCaptureTimeFeeAcrossVolumeTierChange(t *testing.T) {
+	pool := mustPool(t)
+	ctx := context.Background()
+	const mdrBps = 250
+	merchantID := insertActiveMerchant(t, pool, mdrBps)
+	var previousVolume int32
+	if err := pool.QueryRow(ctx, `SELECT total_processed_fils FROM platform_stats WHERE id = 1`).Scan(&previousVolume); err != nil {
+		t.Fatalf("read platform volume: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `UPDATE platform_stats SET total_processed_fils = $1 WHERE id = 1`, previousVolume)
+	})
+	if _, err := pool.Exec(ctx, `UPDATE platform_stats SET total_processed_fils = 1_999_999_999 WHERE id = 1`); err != nil {
+		t.Fatalf("set pre-tier platform volume: %v", err)
+	}
+
+	businessDate := time.Date(2026, 4, 14, 0, 0, 0, 0, time.UTC)
+	start, _ := BusinessDayWindow(businessDate)
+	txnID, captureFee := insertCaptureEvent(t, pool, merchantID, mdrBps, 100_000, start.Add(time.Hour))
+	if _, err := pool.Exec(ctx, `
+		UPDATE transaction_events SET metadata = jsonb_build_object('feeFils', $2::bigint)
+		 WHERE transaction_id = $1 AND event_type = 'captured'
+	`, txnID, int64(captureFee)); err != nil {
+		t.Fatalf("record capture-time fee metadata: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE platform_stats SET total_processed_fils = 2_000_000_000 WHERE id = 1`); err != nil {
+		t.Fatalf("cross volume tier threshold: %v", err)
+	}
+
+	result, err := CloseBatch(ctx, pool, merchantID, businessDate)
+	if err != nil {
+		t.Fatalf("CloseBatch: %v", err)
+	}
+	if result.FeeFils != captureFee {
+		t.Fatalf("settlement fee = %d, want exact capture-time fee %d", result.FeeFils, captureFee)
+	}
+	var journaledFee int64
+	if err := pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(amount_fils), 0) FROM ledger_entries
+		 WHERE transaction_id = $1 AND account_id = 'platform_fee_revenue' AND direction = 'credit'
+	`, txnID).Scan(&journaledFee); err != nil {
+		t.Fatalf("read capture fee ledger: %v", err)
+	}
+	if result.FeeFils != money.Fils(journaledFee) {
+		t.Fatalf("settlement fee = %d, capture fee ledger = %d", result.FeeFils, journaledFee)
+	}
+}
+
 func TestCloseBatch_CarriesRefundDebtIntoLaterPayout(t *testing.T) {
 	pool := mustPool(t)
 	ctx := context.Background()
