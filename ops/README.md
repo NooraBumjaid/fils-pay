@@ -2,9 +2,17 @@
 
 Local development stack for FilsPay: Postgres plus the three services that
 talk to it directly (apps/api, apps/settlement, apps/reporting). The hosted
-demo instance uses the same compose file with a different `.env`.
+demo instance uses the same compose file with deployment secrets provided
+through the process environment.
 
 ## Quick start
+
+Set `POSTGRES_PASSWORD`, `SETTLEMENT_INTERNAL_TOKEN`, and
+`WEBHOOK_SECRET_ENCRYPTION_KEY` before starting Compose. Use a URL-safe
+password (for example, base64url output) because it is embedded in the
+service connection URLs. The internal token must match across API and
+settlement. Use base64 encoding of 32 random bytes for the encryption key.
+The database only needs to be running to execute the first three commands.
 
 ```
 docker compose -f ops/docker-compose.yml up -d postgres
@@ -22,24 +30,20 @@ each package), not services with their own database connection.
 | File | Purpose |
 |---|---|
 | `docker-compose.yml` | the stack |
-| `.env.docker` | shared service settings, loaded by compose for every service |
+| `.env.docker` | API service settings, loaded through its `env_file` entry |
 | `Dockerfile.node` | image for api, reporting, migrate and seed (`node:20`, full install) |
 | `Dockerfile.go` | multi-stage build of `apps/settlement` |
-
-> **AM (July):** the two Dockerfiles aren't in the repo for me. built my own
->
-> **MK:** they were in the initial ops commit. check you're on main
 
 ## Database
 
 Every service, plus the one-off `migrate`/`seed` jobs, connects with the
 same `filspay` role and the same `DATABASE_URL`
-(`postgres://filspay:filspay_dev_password@postgres:5432/filspay?sslmode=disable`).
+(`postgres://filspay:<POSTGRES_PASSWORD>@postgres:5432/filspay?sslmode=disable`).
 One role keeps local setup to a single password instead of hand-rolling
-per-service grants for a stack this size. `sslmode=disable` is safe here:
-Postgres and every service run on the same Docker Compose bridge network,
-which never carries traffic outside the host, so there's no untrusted hop
-for a connection to cross.
+per-service grants for a stack this size. `sslmode=disable` is intended for
+the private Compose bridge. The published Postgres port binds to loopback;
+remote administration must use an authenticated tunnel or a separately
+secured deployment configuration.
 
 The settlement worker can be given a second connection string,
 `PGCONN_SETTLEMENT`, for its batch-close pool. It only takes effect when

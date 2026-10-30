@@ -1,0 +1,14 @@
+.git
+.gitignore
+node_modules
+**/node_modules
+**/coverage
+**/dist
+**/build
+**/*.test.ts
+**/*_test.go
+.env
+.env.*
+ops/.env.docker
+data
+docs

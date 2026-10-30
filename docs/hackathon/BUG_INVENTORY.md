@@ -7,12 +7,12 @@ Verified against code and tests. Case files were leads, not proof.
 | BUG-001 | `0054_views.sql` references nonexistent `settlement_batch_events` | High | db | FIXED (`ce9cbab`) | bootstrap |
 | BUG-002 | `0055` inserts `code`/`account_type` into chart of accounts | High | db | FIXED (`0b9992a`) | bootstrap |
 | BUG-003 | Refund summary joins `transactions.id = refunds.id` | High | db | FIXED (`0b9992a`) | reporting |
-| BUG-004 | Unsigned acquirer callbacks accepted in production by default | Critical | api/config | FIXED (uncommitted) | security |
-| BUG-005 | Compose Dockerfiles missing | High | ops | FIXED (uncommitted) | deploy |
-| BUG-006 | Postgres published on all interfaces | High | ops | FIXED (uncommitted) | security |
-| BUG-007 | Compose did not load `ops/.env.docker` | High | ops | FIXED (uncommitted) | deploy |
-| BUG-008 | Dev webhook encryption key wrong length | High | api/config | FIXED (uncommitted) | deploy |
-| BUG-009 | Compose used committed DB password | High | ops | FIXED (uncommitted) | security |
+| BUG-004 | Unsigned acquirer callbacks accepted in production by default | Critical | api/config | FIXED | security |
+| BUG-005 | Compose Dockerfiles missing | High | ops | FIXED | deploy |
+| BUG-006 | Postgres published on all interfaces | High | ops | FIXED | security |
+| BUG-007 | Compose did not load `ops/.env.docker` | High | ops | FIXED | deploy |
+| BUG-008 | Dev webhook encryption key wrong length | High | api/config | FIXED | deploy |
+| BUG-009 | Compose used committed DB password | High | ops | FIXED | security |
 | BUG-010 | CSV import treats BD as 2-decimal cents | Critical | admin CSV | FIXED | finance memo |
 | BUG-011 | Dashboard fee uses `created_at` not `effective_from` (245 vs 225) | High | fees | FIXED | finance memo |
 | BUG-012 | Split payouts drop remainder fils | High | settlement/splits | FIXED | finance memo |
@@ -40,7 +40,7 @@ Verified against code and tests. Case files were leads, not proof.
 | BUG-034 | Successful refunds were omitted from settlement batches | Critical | settlement | FIXED (`90d4e06`) | FP-300; details in BUG-034.md |
 | BUG-035 | Refund success events were not eligible for webhook delivery | High | webhooks | FIXED (`90d4e06`) | FP-300; details in BUG-035.md |
 | BUG-036 | Refund reporting schema and Bahrain-day rollup were incomplete | High | reporting | FIXED (`90d4e06`) | FP-300; details in BUG-036.md |
-| BUG-039 | Node service image could not install dependencies | High | operations | FIXED (uncommitted) | deployment build; details in BUG-039.md |
+| BUG-039 | Node service image could not install dependencies | High | operations | FIXED | deployment build; details in BUG-039.md |
 
 ## Not a bug / left unchanged
 

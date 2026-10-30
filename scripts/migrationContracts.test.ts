@@ -22,3 +22,16 @@ test("0072 refund summary joins refunds to their owning transaction", () => {
   assert.match(migration, /JOIN transactions t ON t\.id = r\.transaction_id/);
   assert.doesNotMatch(migration, /JOIN transactions t ON t\.id = r\.id\b/);
 });
+
+test("Compose has buildable service images and does not publish Postgres off-host", () => {
+  const compose = readFileSync(join(migrationsDir, "..", "..", "ops", "docker-compose.yml"), "utf8");
+  const opsDir = join(migrationsDir, "..", "..", "ops");
+
+  assert.ok(readFileSync(join(opsDir, "Dockerfile.node"), "utf8").length > 0);
+  assert.ok(readFileSync(join(opsDir, "Dockerfile.go"), "utf8").length > 0);
+  assert.match(compose, /127\.0\.0\.1:5432:5432/);
+  assert.doesNotMatch(compose, /"5432:5432"/);
+  assert.match(compose, /env_file:\s*\n\s*- \.env\.docker/);
+  assert.doesNotMatch(compose, /filspay_dev_password/);
+  assert.match(compose, /POSTGRES_PASSWORD must be set/);
+});
