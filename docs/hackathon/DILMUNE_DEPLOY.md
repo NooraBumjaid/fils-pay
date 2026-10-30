@@ -2,81 +2,101 @@
 
 Target: **1 vCPU, 2 GB RAM**. API limit: **0.5 vCPU / 512 MB**.
 
+The live box already has locally edited Docker Compose and Nginx files.
+**Diff before replacing them.** Keep any live `server_name`, TLS paths, extra
+locations, and published-port choices that are not the bugs below.
+
 Do not run resource-heavy image builds on the box if you can load images
-from a laptop. The hosted overlay does not start web/admin containers;
-those are Vite apps that talk to the API.
+from a laptop. Do **not** run `seed` against data you need to keep.
+Migration `0079_lifetime_payout_estimate_bigint.sql` is already applied —
+`migrate` is idempotent and will skip it.
 
 ## 1. Secrets
 
-Copy `ops/env.hosted.example` to `ops/.env.hosted` (gitignored pattern:
-keep it off the repo).
+Copy `ops/env.hosted.example` to `ops/.env.hosted` (gitignored).
 
-```
-openssl rand -base64 24   # POSTGRES_PASSWORD — URL-safe, no /, +, =
-openssl rand -hex 32      # SETTLEMENT_INTERNAL_TOKEN
-openssl rand -base64 32   # WEBHOOK_SECRET_ENCRYPTION_KEY (must decode to 32 bytes)
-```
+Keep `COOKIE_SECURE=false` until TLS actually terminates in front of the
+API. Set `CORS_ORIGINS` and `CHECKOUT_BASE_URL` to the public origin
+judges use (IP or hostname). Do not invent a domain.
 
-Set `ACQUIRER_CALLBACK_SIGNING_SECRET` to the sandbox HMAC secret.
-Set `CORS_ORIGINS` to the public dashboard/admin origins, for example
-`http://<host>:5173,http://<host>:5174`.
-Keep `COOKIE_SECURE=false` unless TLS terminates in front of the proxy.
+## 2. Core stack (after merging this overlay with the live files)
 
-## 2. Core stack
-
-From the repository root:
+From the repository root, on the box, after a `git pull` of the reviewed
+commit:
 
 ```
 docker compose -f ops/docker-compose.yml -f ops/docker-compose.hosted.yml --env-file ops/.env.hosted up -d postgres
 docker compose -f ops/docker-compose.yml -f ops/docker-compose.hosted.yml --env-file ops/.env.hosted run --rm migrate
-docker compose -f ops/docker-compose.yml -f ops/docker-compose.hosted.yml --env-file ops/.env.hosted up -d api settlement reporting proxy
+docker compose -f ops/docker-compose.yml -f ops/docker-compose.hosted.yml --env-file ops/.env.hosted up -d --build api settlement reporting
 ```
 
-Optional demo fixtures (truncates seed tables — do not use on preserved data):
+Then reload **proxy** only after the SPA dirs and nginx conf are merged
+(section 4). Do not `docker compose down -v`.
+
+Confirm the merged API service has **no** host port 3000:
 
 ```
-docker compose -f ops/docker-compose.yml -f ops/docker-compose.hosted.yml --env-file ops/.env.hosted run --rm seed
+docker compose -f ops/docker-compose.yml -f ops/docker-compose.hosted.yml --env-file ops/.env.hosted config
 ```
+
+`ports: []` in YAML does **not** unpublish an inherited `3000:3000`. The
+overlay uses `ports: !reset []`.
 
 ## 3. Resource split
 
 | Service | CPU | Memory |
 |---|---|---|
-| postgres | 0.25 | 384 MB (`shared_buffers=64MB`) |
+| postgres | 0.20 | 384 MB (`shared_buffers=64MB`) |
 | api | 0.50 | 512 MB (`NODE_OPTIONS=--max-old-space-size=384`, `SHARP_CACHE=0`) |
 | settlement | 0.15 | 256 MB |
 | reporting | 0.10 | 192 MB |
 | nginx proxy | 0.05 | 32 MB |
 
-Postgres is published on `127.0.0.1:5432` only. Public HTTP is nginx `:80`
-(`/healthz`, `/readyz`, `/v1/`).
+Sum = **1.00 vCPU**. Postgres is published on `127.0.0.1:5432` only.
+Public HTTP is nginx `:80` (`/healthz`, `/readyz`, `/v1/`, `/`, `/admin/`).
 
 ## 4. Merchant dashboard, admin, checkout
 
-On the same box or a laptop pointing at the public API:
+Build on a laptop (see `ops/spa/README.md`), copy `apps/web/dist` →
+`ops/spa/web` and `apps/admin/dist` (with `VITE_BASE=/admin/`) →
+`ops/spa/admin`, then rsync those directories onto the box.
 
-```
-cd apps/web && npx vite --host --port 5173
-cd apps/admin && npx vite --host --port 5174
-```
+Nginx must serve:
 
-Vite proxies `/v1` to `127.0.0.1:3000` when run on the box. From another
-machine, set `VITE_API_BASE_URL=http://<host>` (port 80) **and** add that
-page origin to `CORS_ORIGINS`.
+| URL | Dist |
+|---|---|
+| `/` and `/pay/...` | merchant SPA (`ops/spa/web`) |
+| `/admin/` | admin SPA (`ops/spa/admin`) |
+| `/v1/` | `proxy_pass http://api:3000` |
 
-## 5. Health
+If the live nginx already hosts a working merchant SPA, **add**
+`location /admin/` rather than overwriting the whole file blindly.
+
+Vite on `:5173`/`:5174` is a laptop fallback only. Do not rely on it for
+judging if those ports time out.
+
+## 5. HTTPS
+
+No certificate is in this repo. When a real cert exists for a real
+hostname, use `ops/nginx.hosted.tls.example.conf` as a template and set
+`COOKIE_SECURE=true`. Until then keep HTTP + `COOKIE_SECURE=false`.
+
+## 6. Health
 
 ```
 curl -fsS http://127.0.0.1/healthz
 curl -fsS http://127.0.0.1/readyz
+curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/healthz
 ```
 
-`/readyz` is boot-time only (incident 2026-05-14). Confirm Postgres with a
-query, not with `/readyz` after boot.
+The last command must **fail to connect** after port 3000 is unpublished.
+`/readyz` is boot-time only (incident 2026-05-14).
 
-## 6. What not to run on the box
+## 7. What not to run on the box
 
-- `go test` / settlement compile loops — the image already compiles once
+- `go test` / settlement compile loops
 - Full `npm test` against the hosted database
 - `seed` against any database you need to keep
 - Publishing Postgres on `0.0.0.0`
+- `docker compose down -v`
+- Blindly replacing the live nginx/compose files

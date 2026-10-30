@@ -1,5 +1,9 @@
 node_modules/
 dist/
+ops/spa/web/**
+!ops/spa/web/index.html
+ops/spa/admin/**
+!ops/spa/admin/index.html
 *.tsbuildinfo
 .env
 .env.local

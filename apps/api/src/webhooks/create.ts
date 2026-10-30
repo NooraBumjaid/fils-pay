@@ -1,31 +1,19 @@
 import type { Pool } from "pg";
 import type { Config } from "../config.js";
 import { randomToken } from "../lib/crypto.js";
-import { BadRequestError } from "../lib/errors.js";
 import { decodeEncryptionKey, encryptSecret } from "./secretCrypto.js";
+import { assertSafeWebhookDestination } from "./destination.js";
 
 /**
- * Validates a webhook endpoint URL: must parse as an absolute URL with
- * scheme http/https; https is required once config.nodeEnv === 'production'
- * (http is permitted otherwise so a local http.createServer test receiver
- * and a merchant's own localhost dev setup both work).
+ * Validates a webhook endpoint URL. Production requires HTTPS and a
+ * publicly routed destination (no loopback/private/link-local/metadata).
+ * Test/dev still allow http://127.0.0.1 so locked local-receiver tests pass.
  */
-// MK: https-only in prod is our SSRF protection
-// used to block localhost in dev too, removed for the local receiver — am
-export function validateWebhookUrl(rawUrl: string, config: Pick<Config, "nodeEnv">): URL {
-  let parsed: URL;
-  try {
-    parsed = new URL(rawUrl);
-  } catch {
-    throw new BadRequestError("invalid_url");
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new BadRequestError("invalid_url");
-  }
-  if (config.nodeEnv === "production" && parsed.protocol !== "https:") {
-    throw new BadRequestError("invalid_url");
-  }
-  return parsed;
+export async function validateWebhookUrl(
+  rawUrl: string,
+  config: Pick<Config, "nodeEnv">,
+): Promise<URL> {
+  return assertSafeWebhookDestination(rawUrl, { nodeEnv: config.nodeEnv });
 }
 
 export interface CreateWebhookEndpointInput {
@@ -55,7 +43,7 @@ export async function createWebhookEndpoint(
   config: Pick<Config, "nodeEnv" | "webhookSecretEncryptionKey">,
   input: CreateWebhookEndpointInput,
 ): Promise<CreatedWebhookEndpoint> {
-  validateWebhookUrl(input.url, config);
+  await validateWebhookUrl(input.url, config);
 
   const rawSecret = `whsec_${randomToken(24)}`;
   const secretPrefix = rawSecret.slice(0, 14);

@@ -1,13 +1,15 @@
 import type { ApiErrorBody } from "../types.js";
 
 const API_BASE_URL =
-  (import.meta.env.VITE_ADMIN_API_BASE_URL as string | undefined) ?? "http://localhost:3000";
+  (import.meta.env.VITE_ADMIN_API_BASE_URL as string | undefined) ??
+  (import.meta.env.PROD ? "" : "http://localhost:3000");
 
 /** apps/web's own dashboard origin — where a "view as merchant" grant is
  *  actually exercised. */
 // FH: used to build the impersonation link
 export const WEB_BASE_URL =
-  (import.meta.env.VITE_WEB_BASE_URL as string | undefined) ?? "http://localhost:5173";
+  (import.meta.env.VITE_WEB_BASE_URL as string | undefined) ??
+  (import.meta.env.PROD ? "/" : "http://localhost:5173");
 
 /** Mirrors apps/api's own uniform `{ error, message? }` body
  *  (lib/errors.ts / plugins/errorHandler.ts) — one error shape end to
