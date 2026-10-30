@@ -284,6 +284,42 @@ test("admin otp verify rejects a wrong code without burning the challenge", asyn
   assert.equal(rightRes.statusCode, 200, rightRes.body);
 });
 
+test("parallel OTP guesses cannot exceed the admin challenge attempt limit", async () => {
+  const { id, email } = await createAdminUser("support", "parallelotp");
+  const login = await app.inject({
+    method: "POST",
+    url: "/v1/admin/auth/login",
+    payload: { email, password: ADMIN_PASSWORD },
+  });
+  assert.equal(login.statusCode, 200, login.body);
+  const cookie = parseCookie(login.headers["set-cookie"], config.adminCookieName);
+  const realCode = (login.json() as { devOtpCode: string }).devOtpCode;
+  const wrongCode = realCode === "000000" ? "111111" : "000000";
+
+  const guesses = await Promise.all(
+    Array.from({ length: 25 }, () =>
+      app.inject({
+        method: "POST",
+        url: "/v1/admin/auth/otp/verify",
+        headers: { cookie },
+        payload: { code: wrongCode },
+      }),
+    ),
+  );
+  assert.ok(
+    guesses.every((response) => response.statusCode === 401 || response.statusCode === 410 || response.statusCode === 429),
+    `unexpected OTP response statuses: ${guesses.map((response) => response.statusCode).join(",")}`,
+  );
+
+  const challenge = await pool.query<{ attempt_count: number; max_attempts: number }>(
+    `SELECT attempt_count, max_attempts FROM admin_otp_challenges
+      WHERE admin_user_id = $1 ORDER BY created_at DESC LIMIT 1`,
+    [id],
+  );
+  assert.equal(challenge.rows[0]?.attempt_count, challenge.rows[0]?.max_attempts);
+  assert.equal((await app.inject({ method: "GET", url: "/v1/admin/auth/me", headers: { cookie } })).statusCode, 401);
+});
+
 test("a merchant session cookie grants nothing on the admin plane", async () => {
   // fp_sid and fp_admin_sid are separate names backed by separate tables;
   // presenting one where the other is expected must resolve to nothing.

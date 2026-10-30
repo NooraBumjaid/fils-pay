@@ -259,6 +259,89 @@ test("otp verify with the wrong code is rejected", async () => {
   assert.equal(rightRes.statusCode, 200, rightRes.body);
 });
 
+test("parallel OTP guesses cannot exceed the merchant challenge attempt limit", async () => {
+  const password = "parallel-otp-password-456";
+  const { merchantId, email } = await signup("parallel-otp", password);
+  const login = await app.inject({
+    method: "POST",
+    url: "/v1/auth/login",
+    payload: { merchantId, email, password },
+  });
+  assert.equal(login.statusCode, 200, login.body);
+  const cookie = parseCookie(login.headers["set-cookie"]);
+  const realCode = (login.json() as { devOtpCode: string }).devOtpCode;
+  const wrongCode = realCode === "000000" ? "111111" : "000000";
+
+  const guesses = await Promise.all(
+    Array.from({ length: 25 }, () =>
+      app.inject({
+        method: "POST",
+        url: "/v1/auth/otp/verify",
+        headers: { cookie },
+        payload: { code: wrongCode },
+      }),
+    ),
+  );
+  assert.ok(
+    guesses.every((response) => response.statusCode === 401 || response.statusCode === 410 || response.statusCode === 429),
+    `unexpected OTP response statuses: ${guesses.map((response) => response.statusCode).join(",")}`,
+  );
+
+  const challenge = await pool.query<{ attempt_count: number; max_attempts: number }>(
+    `SELECT oc.attempt_count, oc.max_attempts
+       FROM otp_challenges oc JOIN merchant_users mu ON mu.id = oc.merchant_user_id
+      WHERE mu.merchant_id = $1 AND mu.email = $2 ORDER BY oc.created_at DESC LIMIT 1`,
+    [merchantId, email],
+  );
+  assert.equal(challenge.rows[0]?.attempt_count, challenge.rows[0]?.max_attempts);
+  assert.equal((await app.inject({ method: "GET", url: "/v1/auth/me", headers: { cookie } })).statusCode, 401);
+});
+
+test("OTP resend preserves the guess budget and serializes concurrent resends", async () => {
+  const password = "otp-resend-password-456";
+  const { merchantId, email } = await signup("otp-resend", password);
+  const login = await app.inject({
+    method: "POST",
+    url: "/v1/auth/login",
+    payload: { merchantId, email, password },
+  });
+  assert.equal(login.statusCode, 200, login.body);
+  const cookie = parseCookie(login.headers["set-cookie"]);
+  const realCode = (login.json() as { devOtpCode: string }).devOtpCode;
+  const wrongCode = realCode === "000000" ? "111111" : "000000";
+  const wrong = await app.inject({
+    method: "POST",
+    url: "/v1/auth/otp/verify",
+    headers: { cookie },
+    payload: { code: wrongCode },
+  });
+  assert.equal(wrong.statusCode, 401);
+
+  const original = await pool.query<{ id: string }>(
+    `SELECT oc.id FROM otp_challenges oc JOIN merchant_users mu ON mu.id = oc.merchant_user_id
+      WHERE mu.merchant_id = $1 AND mu.email = $2 ORDER BY oc.created_at DESC LIMIT 1`,
+    [merchantId, email],
+  );
+  await pool.query(`UPDATE otp_challenges SET created_at = now() - interval '31 seconds' WHERE id = $1`, [
+    original.rows[0]!.id,
+  ]);
+
+  const resends = await Promise.all([
+    app.inject({ method: "POST", url: "/v1/auth/otp/resend", headers: { cookie } }),
+    app.inject({ method: "POST", url: "/v1/auth/otp/resend", headers: { cookie } }),
+  ]);
+  assert.deepEqual(resends.map((response) => response.statusCode).sort(), [200, 429]);
+
+  const challenges = await pool.query<{ attempt_count: number; max_attempts: number }>(
+    `SELECT oc.attempt_count, oc.max_attempts FROM otp_challenges oc
+      JOIN merchant_users mu ON mu.id = oc.merchant_user_id
+      WHERE mu.merchant_id = $1 AND mu.email = $2 ORDER BY oc.created_at DESC`,
+    [merchantId, email],
+  );
+  assert.equal(challenges.rows.length, 2, "only one concurrent resend may replace the active challenge");
+  assert.equal(challenges.rows[0]?.attempt_count, 1, "resending must preserve prior wrong guesses");
+});
+
 test("KYC upload rejects a fake .pdf whose bytes don't start with %PDF", async () => {
   const { merchantId, cookie } = await signupLoginAndVerify("kycfake");
 

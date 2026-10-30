@@ -123,53 +123,76 @@ export async function adminAuthRoutes(app: FastifyInstance): Promise<void> {
       throw new UnauthorizedError("no_pending_session");
     }
 
-    const challengeResult = await app.db.query<{
-      id: string;
-      code_salt: string;
-      code_hash: string;
-      attempt_count: number;
-      max_attempts: number;
-      expires_at: Date;
-      consumed_at: Date | null;
-    }>(
-      `SELECT id, code_salt, code_hash, attempt_count, max_attempts, expires_at, consumed_at
-         FROM admin_otp_challenges WHERE id = $1`,
-      [pending.otpChallengeId],
-    );
-    const challenge = challengeResult.rows[0];
-    if (!challenge || challenge.consumed_at !== null) {
-      throw new GoneError("otp_expired");
-    }
-    if (challenge.expires_at.getTime() <= Date.now()) {
-      throw new GoneError("otp_expired");
-    }
-
-    // admin path doesn't have the merchant race, the challenge row is read FOR UPDATE — MK
-    if (challenge.attempt_count >= challenge.max_attempts) {
-      await revokeAdminSession(app.db, pending.adminSessionId);
-      throw new TooManyRequestsError("too_many_attempts");
-    }
-
-    const matches = verifyOtpCode(code, challenge.code_salt, challenge.code_hash);
-    if (!matches) {
-      await app.db.query(
-        `UPDATE admin_otp_challenges SET attempt_count = attempt_count + 1 WHERE id = $1`,
-        [challenge.id],
+    const verification = await withTransaction(app.db, async (client) => {
+      const sessionResult = await client.query<{
+        otp_challenge_id: string | null;
+        authenticated: boolean;
+        revoked_at: Date | null;
+        expires_at: Date;
+      }>(
+        `SELECT otp_challenge_id, authenticated, revoked_at, expires_at
+           FROM admin_sessions WHERE id = $1 FOR UPDATE`,
+        [pending.adminSessionId],
       );
-      throw new UnauthorizedError("invalid_code");
-    }
+      const session = sessionResult.rows[0];
+      if (
+        !session ||
+        session.authenticated ||
+        session.revoked_at !== null ||
+        session.expires_at.getTime() <= Date.now() ||
+        session.otp_challenge_id !== pending.otpChallengeId
+      ) {
+        return { kind: "expired" as const };
+      }
+      const challengeResult = await client.query<{
+        id: string;
+        code_salt: string;
+        code_hash: string;
+        attempt_count: number;
+        max_attempts: number;
+        expires_at: Date;
+        consumed_at: Date | null;
+      }>(
+        `SELECT id, code_salt, code_hash, attempt_count, max_attempts, expires_at, consumed_at
+           FROM admin_otp_challenges WHERE id = $1 FOR UPDATE`,
+        [session.otp_challenge_id],
+      );
+      const challenge = challengeResult.rows[0];
+      if (!challenge || challenge.consumed_at !== null || challenge.expires_at.getTime() <= Date.now()) {
+        return { kind: "expired" as const };
+      }
+      if (challenge.attempt_count >= challenge.max_attempts) {
+        await revokeAdminSession(client, pending.adminSessionId);
+        return { kind: "too_many" as const };
+      }
 
-    const adminUser = await withTransaction(app.db, async (client) => {
-      await client.query(`UPDATE admin_otp_challenges SET consumed_at = now() WHERE id = $1`, [
-        challenge.id,
-      ]);
+      if (!verifyOtpCode(code, challenge.code_salt, challenge.code_hash)) {
+        const updated = await client.query<{ attempt_count: number; max_attempts: number }>(
+          `UPDATE admin_otp_challenges SET attempt_count = attempt_count + 1 WHERE id = $1
+           RETURNING attempt_count, max_attempts`,
+          [challenge.id],
+        );
+        const attempts = updated.rows[0];
+        if (!attempts) throw new Error("admin otp/verify: challenge disappeared while locked");
+        if (attempts.attempt_count >= attempts.max_attempts) {
+          await revokeAdminSession(client, pending.adminSessionId);
+          return { kind: "too_many" as const };
+        }
+        return { kind: "invalid" as const };
+      }
+
+      await client.query(`UPDATE admin_otp_challenges SET consumed_at = now() WHERE id = $1`, [challenge.id]);
       await promoteAdminSession(client, pending.adminSessionId, app.config.adminSessionTtlHours);
       const result = await client.query<{ role: AdminRole }>(
         `SELECT role FROM admin_users WHERE id = $1`,
         [pending.adminUserId],
       );
-      return result.rows[0];
+      return { kind: "verified" as const, user: result.rows[0] };
     });
+    if (verification.kind === "expired") throw new GoneError("otp_expired");
+    if (verification.kind === "too_many") throw new TooManyRequestsError("too_many_attempts");
+    if (verification.kind === "invalid") throw new UnauthorizedError("invalid_code");
+    const adminUser = verification.user;
     if (!adminUser) {
       throw new Error("admin otp/verify: admin_users row disappeared mid-transaction");
     }

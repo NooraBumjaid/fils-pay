@@ -45,6 +45,7 @@ Verified against code and tests. Case files were leads, not proof.
 | BUG-041 | Login OTP could target a different merchant account sharing the email | High | auth | FIXED (verified) | BUG-021 |
 | BUG-042 | Concurrent notification scans could race on `settlement.paid` | High | settlement | FIXED (verified) | BUG-024 |
 | BUG-043 | Refund-created negative payable was not carried into later payouts | Critical | settlement/refunds | FIXED (focused DB regression passed) | FP-300; details in BUG-043.md |
+| BUG-044 | Merchant/admin OTP guess limits were bypassable under concurrency and resend | Critical | authentication | FIXED (parallel route regressions passed) | details in BUG-044.md |
 
 ## Not a bug / left unchanged
 
