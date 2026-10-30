@@ -71,8 +71,13 @@ function groupByMerchant(rows: ResidueRow[]): MerchantResidue[] {
 // am: re-running is safe, entry_group_id dedupes it
 async function postResidueCorrection(client: Client, merchant: MerchantResidue, now: Date): Promise<void> {
   if (merchant.residueFils <= 0) return;
-  const entryGroupId = randomUUID();
   const description = "March 2026 scheme rounding residue sweep — manual recon per finance";
+  const existing = await client.query(
+    `SELECT 1 FROM ledger_entries WHERE merchant_id = $1 AND description = $2 LIMIT 1`,
+    [merchant.merchantId, description],
+  );
+  if ((existing.rowCount ?? 0) > 0) return;
+  const entryGroupId = randomUUID();
   await client.query(
     `INSERT INTO ledger_entries (entry_group_id, merchant_id, account_id, direction, amount_fils, occurred_at, description)
      VALUES ($1, $2, 'merchant_payable', 'debit', $3, $4, $5),
