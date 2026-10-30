@@ -48,6 +48,7 @@ Verified against code and tests. Case files were leads, not proof.
 | BUG-044 | Merchant/admin OTP guess limits were bypassable under concurrency and resend | Critical | authentication | FIXED (parallel route regressions passed) | details in BUG-044.md |
 | BUG-045 | Settlement repriced captures using the later platform volume tier | Critical | payments/settlement | FIXED (focused DB regression passed) | details in BUG-045.md |
 | BUG-046 | int4 volume counter overflow revoked the earned platform tier | High | settlement/pricing | FIXED (saturation, recovery migration, DB regressions passed) | details in BUG-046.md |
+| BUG-047 | Independently rounded partial refunds could leave capture fee unreversed | High | refunds/accounting | FIXED (cumulative fee allocation regression passed) | FP-300; details in BUG-047.md |
 
 ## Not a bug / left unchanged
 

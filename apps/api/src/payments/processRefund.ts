@@ -131,6 +131,16 @@ export async function processRefund(
     if (!feeRow) {
       throw new Error("processRefund: fee aggregate returned no row");
     }
+    const priorFeeReversedResult = await client.query<{ fee_reversed_fils: string }>(
+      `SELECT COALESCE(SUM(fee_reversed_fils), 0)::text AS fee_reversed_fils
+         FROM refunds
+        WHERE transaction_id = $1 AND status = 'succeeded'`,
+      [txn.id],
+    );
+    const priorFeeReversedRow = priorFeeReversedResult.rows[0];
+    if (!priorFeeReversedRow) {
+      throw new Error("processRefund: prior fee reversal aggregate returned no row");
+    }
 
     return {
       kind: "proceed" as const,
@@ -143,6 +153,7 @@ export async function processRefund(
       capturedFils,
       refundedFils,
       feeChargedFils: toFils(Number(feeRow.fee_fils)),
+      priorFeeReversedFils: toFils(Number(priorFeeReversedRow.fee_reversed_fils)),
       requestedAmount: validation.amountFils,
     };
   });
@@ -177,11 +188,14 @@ export async function processRefund(
       capturedFils: prepared.capturedFils,
       refundedTotalFils: newRefundedTotal,
     });
-    const feeReversedFils = calculateRefundFee(
+    const cumulativeFeeReversedFils = calculateRefundFee(
       prepared.capturedFils,
       prepared.feeChargedFils,
-      prepared.requestedAmount,
+      newRefundedTotal,
     );
+    const feeReversedFils = compareFils(cumulativeFeeReversedFils, prepared.priorFeeReversedFils) > 0
+      ? subtractFils(cumulativeFeeReversedFils, prepared.priorFeeReversedFils)
+      : ZERO_FILS;
 
     const refundResult = await client.query<{ id: string; occurred_at: Date }>(
       `INSERT INTO refunds
