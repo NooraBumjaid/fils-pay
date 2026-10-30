@@ -105,7 +105,18 @@ func RecalculateMDR(ctx context.Context, db *pgxpool.Pool, merchantID uuid.UUID,
 		if diff == 0 {
 			continue
 		}
-		newNetPayout := b.grossFils - newFee - refundGross
+		oldBatchNet := b.grossFils - b.feeFils - refundGross
+		debtOffset := oldBatchNet - b.netPayoutFils
+		if debtOffset < 0 {
+			debtOffset = 0
+		}
+		newBatchNet := b.grossFils - newFee - refundGross
+		if newBatchNet <= 0 {
+			debtOffset = 0
+		} else if debtOffset > newBatchNet {
+			debtOffset = newBatchNet
+		}
+		newNetPayout := newBatchNet - debtOffset
 		// am: posts against the OLD batch id so it never lands in a new payout?? fixed in FP-244 i think
 		if err := postMdrAdjustment(ctx, tx, merchantID, b.id, diff); err != nil {
 			return RecalcResult{}, err

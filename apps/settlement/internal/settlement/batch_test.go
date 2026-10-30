@@ -204,6 +204,73 @@ func TestCloseBatch_NetsSuccessfulRefundsIntoNextPayout(t *testing.T) {
 	}
 }
 
+func TestCloseBatch_CarriesRefundDebtIntoLaterPayout(t *testing.T) {
+	pool := mustPool(t)
+	ctx := context.Background()
+	const mdrBps = 250
+	merchantID := insertActiveMerchant(t, pool, mdrBps)
+	dayOne := time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)
+	dayOneStart, _ := BusinessDayWindow(dayOne)
+	txnID, _ := insertCaptureEvent(t, pool, merchantID, mdrBps, 100_000, dayOneStart.Add(time.Hour))
+
+	first, err := CloseBatch(ctx, pool, merchantID, dayOne)
+	if err != nil {
+		t.Fatalf("close capture batch: %v", err)
+	}
+	if _, err := PayoutBatch(ctx, pool, first.BatchID); err != nil {
+		t.Fatalf("pay capture batch: %v", err)
+	}
+
+	dayTwo := dayOne.AddDate(0, 0, 1)
+	dayTwoStart, _ := BusinessDayWindow(dayTwo)
+	insertSucceededRefund(t, pool, merchantID, txnID, 50_000, 1_250, dayTwoStart.Add(time.Hour))
+	refundBatch, err := CloseBatch(ctx, pool, merchantID, dayTwo)
+	if err != nil {
+		t.Fatalf("close refund batch: %v", err)
+	}
+	if refundBatch.NetPayoutFils != -48_750 {
+		t.Fatalf("refund batch net = %d, want -48750", refundBatch.NetPayoutFils)
+	}
+	if _, err := PayoutBatch(ctx, pool, refundBatch.BatchID); err != nil {
+		t.Fatalf("process zero-cash refund batch: %v", err)
+	}
+	var afterRefund int64
+	if err := pool.QueryRow(ctx, `SELECT cached_payable_fils FROM merchant_balances WHERE merchant_id = $1`, merchantID).Scan(&afterRefund); err != nil {
+		t.Fatalf("read balance after refund: %v", err)
+	}
+	if afterRefund != -48_750 {
+		t.Fatalf("cached payable after refund = %d, want -48750", afterRefund)
+	}
+
+	dayThree := dayTwo.AddDate(0, 0, 1)
+	dayThreeStart, _ := BusinessDayWindow(dayThree)
+	insertCaptureEvent(t, pool, merchantID, mdrBps, 60_000, dayThreeStart.Add(time.Hour))
+	third, err := CloseBatch(ctx, pool, merchantID, dayThree)
+	if err != nil {
+		t.Fatalf("close later capture batch: %v", err)
+	}
+	if third.NetPayoutFils != 9_750 {
+		t.Fatalf("later payout = %d, want 9750 after carrying 48750 refund debt", third.NetPayoutFils)
+	}
+	var afterClose int64
+	if err := pool.QueryRow(ctx, `SELECT cached_payable_fils FROM merchant_balances WHERE merchant_id = $1`, merchantID).Scan(&afterClose); err != nil {
+		t.Fatalf("read balance after later close: %v", err)
+	}
+	if afterClose != 9_750 {
+		t.Fatalf("cached payable after debt-offset close = %d, want 9750", afterClose)
+	}
+	if _, err := PayoutBatch(ctx, pool, third.BatchID); err != nil {
+		t.Fatalf("pay debt-offset batch: %v", err)
+	}
+	var afterPayout int64
+	if err := pool.QueryRow(ctx, `SELECT cached_payable_fils FROM merchant_balances WHERE merchant_id = $1`, merchantID).Scan(&afterPayout); err != nil {
+		t.Fatalf("read balance after later payout: %v", err)
+	}
+	if afterPayout != 0 {
+		t.Fatalf("cached payable after debt-offset payout = %d, want 0", afterPayout)
+	}
+}
+
 // countRows runs a COUNT(*) query on the shared pool, outside any test
 // transaction, so it only sees committed rows.
 func countRows(t *testing.T, pool *pgxpool.Pool, query string, args ...any) int {

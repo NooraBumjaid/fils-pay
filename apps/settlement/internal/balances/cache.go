@@ -16,6 +16,26 @@ import (
 	"github.com/filspay/settlement/internal/money"
 )
 
+// LockPayable returns the merchant's current cached payable while holding
+// its row lock until the surrounding transaction ends. Settlement close
+// uses this to price a payout against any refund debt carried from earlier
+// batches without racing another close or payout for the same merchant.
+func LockPayable(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID) (money.Fils, error) {
+	_, err := tx.Exec(ctx, `
+		INSERT INTO merchant_balances (merchant_id, cached_payable_fils, updated_at)
+		VALUES ($1, 0, now())
+		ON CONFLICT (merchant_id) DO NOTHING
+	`, merchantID)
+	if err != nil {
+		return 0, err
+	}
+	var payable int64
+	err = tx.QueryRow(ctx, `
+		SELECT cached_payable_fils FROM merchant_balances WHERE merchant_id = $1 FOR UPDATE
+	`, merchantID).Scan(&payable)
+	return money.Fils(payable), err
+}
+
 // ApplyBatchClose is called once, inside CloseBatch's own transaction,
 // immediately after a batch's net_payout_fils is computed. It does not
 // touch ledger_entries — it applies the exact, already-known delta this

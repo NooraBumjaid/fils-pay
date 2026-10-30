@@ -122,6 +122,10 @@ func CloseBatch(ctx context.Context, db *pgxpool.Pool, merchantID uuid.UUID, bus
 		}
 		return BatchResult{}, fmt.Errorf("settlement: CloseBatch: read merchant: %w", err)
 	}
+	priorPayable, err := balances.LockPayable(ctx, tx, merchantID)
+	if err != nil {
+		return BatchResult{}, fmt.Errorf("settlement: CloseBatch: lock merchant payable: %w", err)
+	}
 
 	// Effective-dated fee resolution (apps/settlement/internal/settlement/fee_schedule.go) —
 	// loaded once per batch; EffectiveMdrBpsAt is applied per event below so
@@ -252,7 +256,19 @@ func CloseBatch(ctx context.Context, db *pgxpool.Pool, merchantID uuid.UUID, bus
 	// ledger when the acquirer confirms them. Claiming them here makes the
 	// next batch's frozen payable agree with those ledger movements.
 	batchFee -= feeReversed
-	netPayout := NetPayableFils(batchGross, batchFee) - refundedGross
+	batchNetPayable := NetPayableFils(batchGross, batchFee) - refundedGross
+	// A refund can create a negative cached payable after an earlier payout.
+	// Carry that debt into this payout while retaining the full signed batch
+	// contribution in the cache. A negative batch itself has no payout; its
+	// debt is deducted from a later positive batch.
+	debtOffset := money.Fils(0)
+	if batchNetPayable > 0 && priorPayable < 0 {
+		debtOffset = -priorPayable
+		if debtOffset > batchNetPayable {
+			debtOffset = batchNetPayable
+		}
+	}
+	netPayout := batchNetPayable - debtOffset
 
 	// Record this batch's contribution to the platform-wide lifetime
 	// processed-volume counter, in the same transaction that freezes this
@@ -316,7 +332,7 @@ func CloseBatch(ctx context.Context, db *pgxpool.Pool, merchantID uuid.UUID, bus
 	}
 
 	// Step 14: incrementally update the merchant_balances cache.
-	if err := balances.ApplyBatchClose(ctx, tx, merchantID, batchID, netPayout); err != nil {
+	if err := balances.ApplyBatchClose(ctx, tx, merchantID, batchID, batchNetPayable); err != nil {
 		return BatchResult{}, fmt.Errorf("settlement: CloseBatch: apply balance cache delta: %w", err)
 	}
 

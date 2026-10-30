@@ -52,8 +52,9 @@ function toBatchDateString(d: Date): string {
 }
 
 /**
- * Maps a settlement_batches row to its DTO. Invariant (enforced by the Go
- * worker at close): netPayoutFils === grossFils - feeFils - refundedFils.
+ * Maps a settlement_batches row to its DTO. netPayoutFils is the amount
+ * payable after carrying forward any prior negative merchant balance; the
+ * batch's gross/fee/refund columns remain its own activity totals.
  */
 function serializeBatch(row: SettlementBatchRow): SettlementBatchDto {
   return {
