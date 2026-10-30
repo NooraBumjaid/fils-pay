@@ -3,6 +3,7 @@ import { Client, type Pool } from "pg";
 import type { Config } from "../config.js";
 import { withTransaction } from "../db/withTransaction.js";
 import { decodeEncryptionKey, decryptSecret } from "./secretCrypto.js";
+import { canonicalJson } from "../payments/idempotency.js";
 import { signPayload } from "./sign.js";
 import { buildEnvelope } from "./envelope.js";
 import { recordPayoutDisbursementEffect } from "./payoutDisbursement.js";
@@ -28,6 +29,7 @@ const STEP_B_BATCH_LIMIT = 100;
 const WEBHOOK_ELIGIBLE_EVENT_TYPES: readonly string[] = [
   "transaction.captured",
   "transaction.voided",
+  "refund.succeeded",
   "settlement.paid",
 ];
 const NOTIFY_CHANNEL = "outbox_events_channel";
@@ -155,6 +157,9 @@ async function attemptOneDelivery(
 ): Promise<void> {
   const key = decodeEncryptionKey(config.webhookSecretEncryptionKey);
   const secret = decryptSecret(row.secret_ciphertext, key);
+  // Sign the exact bytes posted. canonicalJson is the body on the wire so
+  // merchant verifySignature (canonical) matches HMAC(raw body) (FP-240).
+  const body = canonicalJson(row.payload);
   const { signature } = signPayload(row.payload, secret);
 
   if (row.attempt_count === 0) {
@@ -169,7 +174,7 @@ async function attemptOneDelivery(
       [WEBHOOK_DELIVERY_ID_HEADER]: row.delivery_event_id,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(row.payload),
+    body,
     timeoutMs: config.webhookRequestTimeoutMs,
   });
 

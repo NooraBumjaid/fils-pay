@@ -136,6 +136,8 @@ export interface PayoutTrendPointDto {
   status: string;
   grossFils: number;
   feeFils: number;
+  refundedFils: number;
+  feeReversedFils: number;
   netPayoutFils: number;
   paidAt: string | null;
 }
@@ -152,6 +154,8 @@ interface PayoutTrendRow {
   status: string;
   gross_fils: string | number;
   fee_fils: string | number;
+  refunded_fils: string | number;
+  fee_reversed_fils: string | number;
   net_payout_fils: string | number;
   paid_at: Date | null;
 }
@@ -163,6 +167,8 @@ function serializePayoutTrendPoint(row: PayoutTrendRow): PayoutTrendPointDto {
     status: row.status,
     grossFils: Number(row.gross_fils),
     feeFils: Number(row.fee_fils),
+    refundedFils: Number(row.refunded_fils),
+    feeReversedFils: Number(row.fee_reversed_fils),
     netPayoutFils: Number(row.net_payout_fils),
     paidAt: row.paid_at ? row.paid_at.toISOString() : null,
   };
@@ -181,7 +187,7 @@ export async function getPayoutTrends(
 ): Promise<PayoutTrendsResponse> {
   const [pointsResult, asOf] = await Promise.all([
     pool.query<PayoutTrendRow>(
-      `SELECT settlement_batch_id, batch_date, status, gross_fils, fee_fils, net_payout_fils, paid_at
+      `SELECT settlement_batch_id, batch_date, status, gross_fils, fee_fils, refunded_fils, fee_reversed_fils, net_payout_fils, paid_at
          FROM merchant_payout_trends
         WHERE merchant_id = $1 AND batch_date >= $2 AND batch_date < $3
         ORDER BY batch_date ASC`,

@@ -10,6 +10,8 @@ export interface SettlementBatchDto {
   status: string;
   grossFils: number;
   feeFils: number;
+  refundedFils: number;
+  feeReversedFils: number;
   netPayoutFils: number;
   closedAt: string | null;
   paidAt: string | null;
@@ -22,6 +24,8 @@ interface SettlementBatchRow {
   status: string;
   gross_fils: string | number;
   fee_fils: string | number;
+  refunded_fils: string | number;
+  fee_reversed_fils: string | number;
   net_payout_fils: string | number;
   closed_at: Date | null;
   paid_at: Date | null;
@@ -49,7 +53,7 @@ function toBatchDateString(d: Date): string {
 
 /**
  * Maps a settlement_batches row to its DTO. Invariant (enforced by the Go
- * worker at close): netPayoutFils === grossFils - feeFils for every batch.
+ * worker at close): netPayoutFils === grossFils - feeFils - refundedFils.
  */
 function serializeBatch(row: SettlementBatchRow): SettlementBatchDto {
   return {
@@ -58,6 +62,8 @@ function serializeBatch(row: SettlementBatchRow): SettlementBatchDto {
     status: row.status,
     grossFils: Number(row.gross_fils),
     feeFils: Number(row.fee_fils),
+    refundedFils: Number(row.refunded_fils),
+    feeReversedFils: Number(row.fee_reversed_fils),
     netPayoutFils: Number(row.net_payout_fils),
     closedAt: row.closed_at ? row.closed_at.toISOString() : null,
     paidAt: row.paid_at ? row.paid_at.toISOString() : null,
@@ -117,7 +123,7 @@ export async function listSettlementBatches(
   const decodedCursor = decodeCursor(filters.cursor);
 
   const result = await pool.query<SettlementBatchRow>(
-    `SELECT id, batch_date, status, gross_fils, fee_fils, net_payout_fils, closed_at, paid_at
+    `SELECT id, batch_date, status, gross_fils, fee_fils, refunded_fils, fee_reversed_fils, net_payout_fils, closed_at, paid_at
        FROM settlement_batches
       WHERE merchant_id = $1
         AND ($2::date IS NULL OR batch_date >= $2)
@@ -154,6 +160,7 @@ export interface SettlementBatchDetailDto extends SettlementBatchDto {
    *  within the batch window contributes one scheme_export_lines row but
    *  two transaction_events rows. */
   includedEventCount: number;
+  includedRefundCount: number;
 }
 
 /**
@@ -166,26 +173,28 @@ export async function getSettlementBatch(
   input: { merchantId: string; batchId: string },
 ): Promise<SettlementBatchDetailDto | null> {
   const batchResult = await pool.query<SettlementBatchRow>(
-    `SELECT id, batch_date, status, gross_fils, fee_fils, net_payout_fils, closed_at, paid_at
+    `SELECT id, batch_date, status, gross_fils, fee_fils, refunded_fils, fee_reversed_fils, net_payout_fils, closed_at, paid_at
        FROM settlement_batches WHERE id = $1 AND merchant_id = $2`,
     [input.batchId, input.merchantId],
   );
   const row = batchResult.rows[0];
   if (!row) return null;
 
-  const [txnCountResult, eventCountResult] = await Promise.all([
+  const [txnCountResult, eventCountResult, refundCountResult] = await Promise.all([
     pool.query<{ count: string }>(`SELECT count(*) FROM scheme_export_lines WHERE settlement_batch_id = $1`, [
       input.batchId,
     ]),
     pool.query<{ count: string }>(`SELECT count(*) FROM transaction_events WHERE settlement_batch_id = $1`, [
       input.batchId,
     ]),
+    pool.query<{ count: string }>(`SELECT count(*) FROM refunds WHERE settlement_batch_id = $1`, [input.batchId]),
   ]);
 
   return {
     ...serializeBatch(row),
     includedTransactionCount: Number(txnCountResult.rows[0]?.count ?? 0),
     includedEventCount: Number(eventCountResult.rows[0]?.count ?? 0),
+    includedRefundCount: Number(refundCountResult.rows[0]?.count ?? 0),
   };
 }
 
@@ -285,7 +294,7 @@ export async function getReconciliationReport(
   const windowStart = bahrainLocalMidnightUtc(input.from);
   const windowEnd = bahrainLocalMidnightUtc(input.to);
 
-  const [ledgerResult, settlementResult, pendingResult, merchantResult] = await Promise.all([
+  const [ledgerResult, settlementResult, pendingResult, pendingRefundResult, merchantResult] = await Promise.all([
     pool.query<{ net: string }>(
       `SELECT COALESCE(SUM(CASE WHEN direction = 'credit' THEN amount_fils ELSE -amount_fils END), 0) AS net
          FROM ledger_entries
@@ -309,6 +318,14 @@ export async function getReconciliationReport(
           AND te.occurred_at >= $2 AND te.occurred_at < $3`,
       [input.merchantId, windowStart, windowEnd],
     ),
+    pool.query<{ amount_fils: string | number; fee_reversed_fils: string | number }>(
+      `SELECT amount_fils, fee_reversed_fils
+         FROM refunds
+        WHERE merchant_id = $1 AND status = 'succeeded'
+          AND settlement_batch_id IS NULL
+          AND occurred_at >= $2 AND occurred_at < $3`,
+      [input.merchantId, windowStart, windowEnd],
+    ),
     pool.query<{ mdr_bps: number; negotiated_discount_bps: number }>(
       `SELECT mdr_bps, negotiated_discount_bps FROM merchants WHERE id = $1`,
       [input.merchantId],
@@ -326,6 +343,10 @@ export async function getReconciliationReport(
     const amountFils = Number(row.amount_fils);
     const feeFils = estimateFeeFils(amountFils, mdrBps, discountBps);
     pendingUnbatchedFils += amountFils - feeFils;
+  }
+  for (const row of pendingRefundResult.rows) {
+    pendingUnbatchedFils -= Number(row.amount_fils);
+    pendingUnbatchedFils += Number(row.fee_reversed_fils);
   }
 
   const ledgerMerchantPayableNetFils = Number(ledgerResult.rows[0]?.net ?? 0);

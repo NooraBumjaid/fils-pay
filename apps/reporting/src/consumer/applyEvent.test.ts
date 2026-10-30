@@ -118,6 +118,24 @@ test("applyTransactionVoided (via applyEvent): increments voided_count, leaves c
   assert.equal(result.rows[0].voided_count, 1);
 });
 
+test("refund.succeeded increments refund totals using the Bahrain business date", async () => {
+  const merchantId = await createMerchant("refund-rollup");
+  const row = makeRow({
+    event_type: "refund.succeeded",
+    created_at: new Date("2026-01-04T21:30:00.000Z"), // 2026-01-05 00:30 in Bahrain
+    payload: { merchantId, refundId: randomUUID(), amountFils: 2_750, feeReversedFils: 69 },
+  });
+
+  await withTransaction(pool, (client) => applyEvent(client, row));
+
+  const result = await pool.query<{ refund_count: number; refund_gross_fils: string }>(
+    `SELECT refund_count, refund_gross_fils FROM merchant_daily_volume WHERE merchant_id = $1 AND volume_date = '2026-01-05'`,
+    [merchantId],
+  );
+  assert.equal(result.rows[0]?.refund_count, 1);
+  assert.equal(Number(result.rows[0]?.refund_gross_fils), 2_750);
+});
+
 test("applyBatchClosed (via applyEvent): creates a merchant_payout_trends row copying settlement_batches' status/paid_at as of application time", async () => {
   const merchantId = await createMerchant("batch-closed");
   const paidAt = new Date("2026-01-06T12:00:00Z");

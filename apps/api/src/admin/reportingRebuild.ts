@@ -15,8 +15,10 @@ export async function refreshAnalyticsRollups(client: PoolClient): Promise<Rebui
 
   const trendResult = await client.query(
     `INSERT INTO merchant_payout_trends
-        (merchant_id, settlement_batch_id, batch_date, status, gross_fils, fee_fils, net_payout_fils, paid_at, last_updated_at)
-     SELECT merchant_id, id, batch_date, status, gross_fils, fee_fils, net_payout_fils, paid_at, now()
+        (merchant_id, settlement_batch_id, batch_date, status, gross_fils, fee_fils, net_payout_fils,
+         refunded_fils, fee_reversed_fils, paid_at, last_updated_at)
+     SELECT merchant_id, id, batch_date, status, gross_fils, fee_fils, net_payout_fils,
+            refunded_fils, fee_reversed_fils, paid_at, now()
        FROM settlement_batches`,
   );
 

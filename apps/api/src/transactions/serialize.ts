@@ -6,6 +6,7 @@ export interface TransactionRow {
   status: string;
   amount_fils: string | number;
   captured_fils: string | number;
+  refunded_fils: string | number;
   currency: string;
   reference: string | null;
   acquirer_reference: string;
@@ -24,6 +25,7 @@ export interface TransactionDto {
   status: string;
   amountFils: number;
   capturedFils: number;
+  refundedFils: number;
   currency: string;
   reference: string | null;
   acquirerReference: string;
@@ -42,6 +44,7 @@ export function serializeTransaction(row: TransactionRow): TransactionDto {
     status: row.status,
     amountFils: Number(row.amount_fils),
     capturedFils: Number(row.captured_fils),
+    refundedFils: Number(row.refunded_fils),
     currency: row.currency,
     reference: row.reference,
     acquirerReference: row.acquirer_reference,

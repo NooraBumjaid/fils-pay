@@ -2,9 +2,8 @@
  * Tests for the merchant-scoped refund entry point against a real, migrated
  * Postgres. Requires `DATABASE_URL` (run `npm run migrate` first).
  *
- * The route is not registered yet (`POST /v1/refunds` is still a 501 stub),
- * so these call the module directly — including `assertRefundRequestScope`,
- * which is the check the route performs before handing over.
+ * These exercise both the merchant-scoped module and the registered
+ * `POST /v1/refunds` route against a real, migrated Postgres.
  */
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -167,8 +166,6 @@ test("a partial refund of the caller's own transaction succeeds", async () => {
   assert.equal(Number(row.rows[0]!.refunded_fils), 2_500);
 });
 
-// TODO: another merchant's existing transactionId should also 404. currently refunds it — am
-// FH: Claude wrote a test for this but it passed?? so it's fine. deleted it as redundant
 test("a transactionId that does not exist is a 404, not a 500", async () => {
   const merchant = await createApprovedMerchantWithApiKey("missing-txn");
 
@@ -182,6 +179,107 @@ test("a transactionId that does not exist is a 404, not a 500", async () => {
       }),
     NotFoundError,
   );
+});
+
+test("different idempotency keys cannot concurrently refund beyond the captured balance", async () => {
+  const merchant = await createApprovedMerchantWithApiKey("concurrent-partials");
+  const transactionId = await capturedTransaction(merchant.rawKey, 10_000);
+
+  const results = await Promise.all([
+    initiateMerchantRefund(pool, approvingAcquirer, {
+      merchantId: merchant.merchantId,
+      transactionId,
+      amountFils: toFils(6_000),
+      idempotencyKey: randomUUID(),
+      actor: merchant.actor,
+    }),
+    initiateMerchantRefund(pool, approvingAcquirer, {
+      merchantId: merchant.merchantId,
+      transactionId,
+      amountFils: toFils(6_000),
+      idempotencyKey: randomUUID(),
+      actor: merchant.actor,
+    }),
+  ]);
+
+  assert.equal(results.filter((result) => result.statusCode === 200).length, 1);
+  assert.equal(results.filter((result) => result.statusCode === 422).length, 1);
+  const persisted = await pool.query<{ total: string; count: string }>(
+    `SELECT COALESCE(SUM(amount_fils), 0)::text AS total, COUNT(*)::text AS count
+       FROM refunds WHERE transaction_id = $1 AND status = 'succeeded'`,
+    [transactionId],
+  );
+  assert.equal(Number(persisted.rows[0]!.total), 6_000);
+  assert.equal(Number(persisted.rows[0]!.count), 1);
+});
+
+test("a merchant cannot refund another merchant's transaction by UUID", async () => {
+  const owner = await createApprovedMerchantWithApiKey("foreign-owner");
+  const caller = await createApprovedMerchantWithApiKey("foreign-caller");
+  const transactionId = await capturedTransaction(owner.rawKey, 5_000);
+
+  await assert.rejects(
+    () => initiateMerchantRefund(pool, approvingAcquirer, {
+      merchantId: caller.merchantId,
+      transactionId,
+      idempotencyKey: randomUUID(),
+      actor: caller.actor,
+    }),
+    NotFoundError,
+  );
+
+  const refunds = await pool.query<{ count: string }>(
+    `SELECT COUNT(*)::text AS count FROM refunds WHERE transaction_id = $1`,
+    [transactionId],
+  );
+  assert.equal(Number(refunds.rows[0]!.count), 0);
+});
+
+test("POST /v1/refunds completes a full refund through the authenticated route", async () => {
+  const merchant = await createApprovedMerchantWithApiKey("route-full");
+  const transactionId = await capturedTransaction(merchant.rawKey, 8_000);
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/v1/refunds",
+    headers: { authorization: `Bearer ${merchant.rawKey}`, "idempotency-key": randomUUID() },
+    payload: { transactionId },
+  });
+  assert.equal(response.statusCode, 200, response.body);
+  const body = response.json() as { transactionId: string; amountFils: number; transactionStatus: string; id: string };
+  assert.equal(body.transactionId, transactionId);
+  assert.equal(body.amountFils, 8_000);
+  assert.equal(body.transactionStatus, "refunded");
+
+  const persisted = await pool.query<{ amount_fils: string; status: string }>(
+    `SELECT r.amount_fils, t.status FROM refunds r JOIN transactions t ON t.id = r.transaction_id WHERE r.id = $1`,
+    [body.id],
+  );
+  assert.equal(Number(persisted.rows[0]!.amount_fils), 8_000);
+  assert.equal(persisted.rows[0]!.status, "refunded");
+});
+
+test("POST /v1/refunds supports partial refunds and rejects excess retries", async () => {
+  const merchant = await createApprovedMerchantWithApiKey("route-partial");
+  const transactionId = await capturedTransaction(merchant.rawKey, 9_000);
+
+  const partial = await app.inject({
+    method: "POST",
+    url: "/v1/refunds",
+    headers: { authorization: `Bearer ${merchant.rawKey}`, "idempotency-key": randomUUID() },
+    payload: { transactionId, amountFils: 3_500 },
+  });
+  assert.equal(partial.statusCode, 200, partial.body);
+  assert.equal(partial.json().transactionStatus, "partially_refunded");
+
+  const excess = await app.inject({
+    method: "POST",
+    url: "/v1/refunds",
+    headers: { authorization: `Bearer ${merchant.rawKey}`, "idempotency-key": randomUUID() },
+    payload: { transactionId, amountFils: 5_501 },
+  });
+  assert.equal(excess.statusCode, 422, excess.body);
+  assert.equal(excess.json().code, "refund_exceeds_refundable");
 });
 
 test("an invalid refund amount is refused by the validator", async () => {

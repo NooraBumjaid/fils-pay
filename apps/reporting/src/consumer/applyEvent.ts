@@ -88,6 +88,8 @@ async function applyBatchClosed(client: PoolClient, row: OutboxEventRow): Promis
     grossFils: number;
     feeFils: number;
     netPayoutFils: number;
+    refundedFils?: number;
+    feeReversedFils?: number;
   };
 
   const batchResult = await client.query<{ status: string; paid_at: Date | null }>(
@@ -99,11 +101,13 @@ async function applyBatchClosed(client: PoolClient, row: OutboxEventRow): Promis
 
   await client.query(
     `INSERT INTO merchant_payout_trends
-        (merchant_id, settlement_batch_id, batch_date, status, gross_fils, fee_fils, net_payout_fils, paid_at, last_updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+        (merchant_id, settlement_batch_id, batch_date, status, gross_fils, fee_fils, net_payout_fils,
+         refunded_fils, fee_reversed_fils, paid_at, last_updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
      ON CONFLICT (merchant_id, settlement_batch_id) DO UPDATE
        SET status = EXCLUDED.status, gross_fils = EXCLUDED.gross_fils,
            fee_fils = EXCLUDED.fee_fils, net_payout_fils = EXCLUDED.net_payout_fils,
+           refunded_fils = EXCLUDED.refunded_fils, fee_reversed_fils = EXCLUDED.fee_reversed_fils,
            paid_at = EXCLUDED.paid_at, last_updated_at = now()`,
     [
       payload.merchantId,
@@ -113,6 +117,8 @@ async function applyBatchClosed(client: PoolClient, row: OutboxEventRow): Promis
       payload.grossFils,
       payload.feeFils,
       payload.netPayoutFils,
+      payload.refundedFils ?? 0,
+      payload.feeReversedFils ?? 0,
       batch.paid_at,
     ],
   );
@@ -167,7 +173,7 @@ export async function applyDailySummaryRollup(
   occurredAt: Date,
   amountFils: number,
 ): Promise<void> {
-  const summaryDate = occurredAt.toISOString().slice(0, 10);
+  const summaryDate = toBahrainDateString(occurredAt);
   await client.query(
     `INSERT INTO merchant_daily_volume (merchant_id, volume_date, refund_count, refund_gross_fils, last_updated_at)
      VALUES ($1, $2, 1, $3, now())
@@ -196,6 +202,10 @@ export async function applyEvent(client: PoolClient, row: OutboxEventRow): Promi
       return applyTransactionVoided(client, row);
     case "settlement.batch_closed":
       return applyBatchClosed(client, row);
+    case "refund.succeeded": {
+      const payload = row.payload as { merchantId: string; amountFils: number };
+      return applyDailySummaryRollup(client, payload.merchantId, row.created_at, payload.amountFils);
+    }
     default:
       throw new Error(`applyEvent: unhandled event_type ${row.event_type}`);
   }

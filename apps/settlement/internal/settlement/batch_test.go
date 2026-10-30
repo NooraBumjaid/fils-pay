@@ -148,6 +148,62 @@ func insertAdditionalCaptureEvent(t *testing.T, pool *pgxpool.Pool, merchantID, 
 	return feeFils
 }
 
+func insertSucceededRefund(t *testing.T, pool *pgxpool.Pool, merchantID, txnID uuid.UUID, amountFils, feeReversed money.Fils, occurredAt time.Time) uuid.UUID {
+	t.Helper()
+	var id uuid.UUID
+	err := pool.QueryRow(context.Background(), `
+		INSERT INTO refunds
+		  (transaction_id, merchant_id, amount_fils, fee_reversed_fils, status,
+		   acquirer_reference, created_by_type, created_by_id, occurred_at)
+		VALUES ($1, $2, $3, $4, 'succeeded', $5, 'merchant_api_key', $6, $7)
+		RETURNING id
+	`, txnID, merchantID, int64(amountFils), int64(feeReversed), "refund-"+uuid.NewString(), uuid.New(), occurredAt).Scan(&id)
+	if err != nil {
+		t.Fatalf("insertSucceededRefund: %v", err)
+	}
+	return id
+}
+
+func TestCloseBatch_NetsSuccessfulRefundsIntoNextPayout(t *testing.T) {
+	pool := mustPool(t)
+	ctx := context.Background()
+	const mdrBps = 250
+	merchantID := insertActiveMerchant(t, pool, mdrBps)
+	businessDate := time.Date(2026, 4, 5, 0, 0, 0, 0, time.UTC)
+	start, _ := BusinessDayWindow(businessDate)
+	txnID, chargedFee := insertCaptureEvent(t, pool, merchantID, mdrBps, 100_000, start.Add(time.Hour))
+	if chargedFee != 2_500 {
+		t.Fatalf("capture fee = %d, want 2500", chargedFee)
+	}
+	firstRefund := insertSucceededRefund(t, pool, merchantID, txnID, 40_000, 1_000, start.Add(2*time.Hour))
+	secondRefund := insertSucceededRefund(t, pool, merchantID, txnID, 10_000, 250, start.Add(3*time.Hour))
+
+	result, err := CloseBatch(ctx, pool, merchantID, businessDate)
+	if err != nil {
+		t.Fatalf("CloseBatch: %v", err)
+	}
+	if result.GrossFils != 100_000 {
+		t.Errorf("gross = %d, want 100000", result.GrossFils)
+	}
+	if result.FeeFils != 1_250 {
+		t.Errorf("net fee = %d, want 1250", result.FeeFils)
+	}
+	if result.NetPayoutFils != 48_750 {
+		t.Errorf("net payout = %d, want 48750", result.NetPayoutFils)
+	}
+
+	var assigned int
+	err = pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM refunds WHERE id = ANY($1) AND settlement_batch_id = $2
+	`, []uuid.UUID{firstRefund, secondRefund}, result.BatchID).Scan(&assigned)
+	if err != nil {
+		t.Fatalf("read claimed refunds: %v", err)
+	}
+	if assigned != 2 {
+		t.Errorf("claimed refunds = %d, want 2", assigned)
+	}
+}
+
 // countRows runs a COUNT(*) query on the shared pool, outside any test
 // transaction, so it only sees committed rows.
 func countRows(t *testing.T, pool *pgxpool.Pool, query string, args ...any) int {

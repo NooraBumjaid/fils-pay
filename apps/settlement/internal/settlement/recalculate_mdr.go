@@ -64,7 +64,7 @@ func RecalculateMDR(ctx context.Context, db *pgxpool.Pool, merchantID uuid.UUID,
 		SELECT id, batch_date, status, gross_fils, fee_fils, net_payout_fils
 		  FROM settlement_batches
 		 WHERE merchant_id = $1 AND batch_date >= $2 AND batch_date < $3
-		   AND status <> 'open'
+		   AND status = 'closed'
 		 ORDER BY batch_date
 		 FOR UPDATE
 	`, merchantID, from, to)
@@ -96,11 +96,16 @@ func RecalculateMDR(ctx context.Context, db *pgxpool.Pool, merchantID uuid.UUID,
 		if err != nil {
 			return RecalcResult{}, err
 		}
+		refundGross, refundFeeReversed, err := batchRefundAdjustments(ctx, tx, b.id)
+		if err != nil {
+			return RecalcResult{}, err
+		}
+		newFee -= refundFeeReversed
 		diff := newFee - b.feeFils
 		if diff == 0 {
 			continue
 		}
-		newNetPayout := b.grossFils - newFee
+		newNetPayout := b.grossFils - newFee - refundGross
 		// am: posts against the OLD batch id so it never lands in a new payout?? fixed in FP-244 i think
 		if err := postMdrAdjustment(ctx, tx, merchantID, b.id, diff); err != nil {
 			return RecalcResult{}, err
@@ -130,6 +135,19 @@ func RecalculateMDR(ctx context.Context, db *pgxpool.Pool, merchantID uuid.UUID,
 		return RecalcResult{}, fmt.Errorf("settlement: RecalculateMDR: commit: %w", err)
 	}
 	return RecalcResult{BatchesConsidered: len(batches), Adjusted: adjusted}, nil
+}
+
+func batchRefundAdjustments(ctx context.Context, tx pgx.Tx, batchID uuid.UUID) (money.Fils, money.Fils, error) {
+	var gross, feeReversed int64
+	err := tx.QueryRow(ctx, `
+		SELECT COALESCE(SUM(amount_fils), 0), COALESCE(SUM(fee_reversed_fils), 0)
+		  FROM refunds
+		 WHERE settlement_batch_id = $1 AND status = 'succeeded'
+	`, batchID).Scan(&gross, &feeReversed)
+	if err != nil {
+		return 0, 0, fmt.Errorf("settlement: RecalculateMDR: read batch refunds for %s: %w", batchID, err)
+	}
+	return money.Fils(gross), money.Fils(feeReversed), nil
 }
 
 // recomputeBatchFee sums ComputeSettlementFee over every transaction_events

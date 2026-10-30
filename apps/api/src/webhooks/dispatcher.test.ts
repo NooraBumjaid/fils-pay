@@ -73,6 +73,17 @@ async function enqueueCaptured(merchantId: string) {
   });
 }
 
+async function enqueueRefundSucceeded(merchantId: string) {
+  const transactionId = randomUUID();
+  const refundId = randomUUID();
+  return enqueueEvent(pool, {
+    eventType: "refund.succeeded",
+    aggregateType: "transaction",
+    aggregateId: transactionId,
+    payload: { merchantId, refundId, amountFils: 2_500, feeReversedFils: 63, refundedTotalFils: 2_500, newStatus: "partially_refunded" },
+  });
+}
+
 async function forceDueNow(deliveryId: string): Promise<void> {
   await pool.query(`UPDATE webhook_deliveries SET next_attempt_at = now() - interval '1 second' WHERE id = $1`, [
     deliveryId,
@@ -176,6 +187,30 @@ test("one active endpoint, 2xx response: exact headers/body sent, delivery marke
   assert.equal(delivery.attempt_count, 1);
   assert.equal(delivery.response_status_code, 200);
   assert.equal(delivery.delivery_event_id, body.id);
+});
+
+test("refund.succeeded reaches the merchant endpoint with a signed public envelope", async () => {
+  const merchantId = await createMerchant("refund-webhook");
+  const endpointUrl = `http://fake-receiver.test/refund-${randomUUID()}`;
+  const endpoint = await createEndpoint(merchantId, endpointUrl);
+  const outboxEvent = await enqueueRefundSucceeded(merchantId);
+  const captured: WebhookTransportRequest[] = [];
+  const transport: WebhookTransport = async (req) => {
+    if (req.url === endpointUrl) captured.push(req);
+    return { statusCode: 200, body: "ok" };
+  };
+
+  await runDispatchPass(pool, transport, config);
+
+  assert.equal(captured.length, 1);
+  const req = captured[0]!;
+  const envelope = JSON.parse(req.body) as { type: string; data: Record<string, unknown> };
+  assert.equal(envelope.type, "refund.succeeded");
+  assert.equal(envelope.data.merchantId, merchantId);
+  assert.equal(envelope.data.amountFils, 2_500);
+  assert.equal(envelope.data.status, "partially_refunded");
+  assert.deepEqual(verifySignature(envelope, req.headers[WEBHOOK_SIGNATURE_HEADER]!, endpoint.secret), { valid: true });
+  assert.equal((await getDelivery(String(outboxEvent.id), endpoint.id)).status, "succeeded");
 });
 
 test("failing endpoint: backoff/exhaustion sequence across repeated runDispatchPass calls, next_attempt_at progresses correctly, exhausted at webhookMaxAttempts", async () => {

@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import { ZERO_FILS, addFils, calculateRefundFee, compareFils, subtractFils, toFils, type Fils } from "@filspay/money";
 import { enqueueEvent } from "@filspay/events";
-import { withTransaction } from "../db/withTransaction.js";
 import type { AcquirerSimulator } from "../acquirer/types.js";
 import { claimIdempotencyKey, completeIdempotencyKey, failIdempotencyKey, hashRequest } from "./idempotency.js";
 import { recordTransactionEvent } from "../transactions/events.js";
@@ -48,8 +47,17 @@ export async function processRefund(
     reason: input.reason ?? null,
   });
 
+  // Serialize all refund requests for this transaction across API replicas.
+  // The advisory lock stays on this checked-out session while the acquirer
+  // call is in flight, so different idempotency keys cannot overspend the
+  // remaining captured amount.
+  const client = await pool.connect();
+  const lockKey = input.transactionId;
+  try {
+    await client.query(`SELECT pg_advisory_lock(hashtextextended($1, 0))`, [lockKey]);
+    try {
   // 1 validate
-  const prepared = await withTransaction(pool, async (client) => {
+  const prepared = await withClientTransaction(client, async (client) => {
     const claim = await claimIdempotencyKey(client, {
       merchantId: input.merchantId,
       endpoint: ENDPOINT,
@@ -73,8 +81,9 @@ export async function processRefund(
     const txnResult = await client.query<RefundTransactionRow>(
       `SELECT id, merchant_id, status, amount_fils, captured_fils, refunded_fils, acquirer_reference
          FROM transactions
-        WHERE id = $1`,
-      [input.transactionId],
+        WHERE id = $1 AND merchant_id = $2
+        FOR UPDATE`,
+      [input.transactionId, input.merchantId],
     );
     const txn = txnResult.rows[0];
     if (!txn) {
@@ -87,7 +96,7 @@ export async function processRefund(
     const capturedFils = toFils(Number(txn.captured_fils));
     const refundedFils = toFils(Number(txn.refunded_fils));
 
-    const refundableFils = subtractFils(amountAuthorized, refundedFils);
+    const refundableFils = subtractFils(capturedFils, refundedFils);
 
     const validation = validateRefundRequest(
       {
@@ -150,7 +159,7 @@ export async function processRefund(
   });
 
   // 3 journal
-  return withTransaction(pool, async (client) => {
+  return await withClientTransaction(client, async (client) => {
     if (acquirerResult.outcome === "declined") {
       const body = { error: "refund_declined" };
       await completeIdempotencyKey(client, prepared.claimId, { statusCode: 402, body });
@@ -186,7 +195,7 @@ export async function processRefund(
         prepared.requestedAmount,
         feeReversedFils,
         acquirerResult.acquirerReference,
-        input.reason ?? null,
+        input.reason ?? "unspecified",
         input.actor.type,
         input.actor.id,
       ],
@@ -275,4 +284,25 @@ export async function processRefund(
     });
     return { statusCode: 200, body };
   });
+    } finally {
+      await client.query(`SELECT pg_advisory_unlock(hashtextextended($1, 0))`, [lockKey]);
+    }
+  } finally {
+    client.release();
+  }
+}
+
+async function withClientTransaction<T>(
+  client: import("pg").PoolClient,
+  work: (client: import("pg").PoolClient) => Promise<T>,
+): Promise<T> {
+  await client.query("BEGIN");
+  try {
+    const result = await work(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  }
 }
